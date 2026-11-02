@@ -138,8 +138,8 @@ bool OpenConfiguredVideo(double seek_seconds = 0.0, bool show_error = true) {
     }
     if (!g_decoder.Open(path.c_str(), g_presenter.GetDevice())) {
         if (CheckDeviceLost()) return false;
-        // Silent GPU recovery attempts remain retryable; ordinary file failures
-        // are retried only when the user explicitly chooses the video again.
+        // Device failures stay on the recovery path. Ordinary file failures
+        // must not cause a healthy graphics device to be rebuilt.
         if (show_error) {
             g_failed_video_path = path;
             ShowDecoderError("Windows could not open this video.");
@@ -306,10 +306,9 @@ bool RebuildGraphics(bool reopen_video) {
     g_device_lost = false;
     if (reopen_video && !g_suspended &&
         !g_config.Get().video_path.empty()) {
-        const bool reopened = OpenConfiguredVideo(resume_seconds,
-                                                  !recovering_device);
-        if (recovering_device && !reopened &&
-            g_failed_video_path != g_config.Get().video_path) g_device_lost = true;
+        OpenConfiguredVideo(resume_seconds, !recovering_device);
+        // OpenConfiguredVideo checks GetDeviceRemovedReason on open failure.
+        // A missing or undecodable file alone does not mean the GPU was lost.
     }
     return !g_device_lost;
 }

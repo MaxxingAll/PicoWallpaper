@@ -47,24 +47,24 @@ HRESULT ReadMFVideoFormat(IMFMediaType* media_type, VideoFormat& format) {
     if (SUCCEEDED(hr)) {
         const double left = area.OffsetX.value + area.OffsetX.fract / 65536.0;
         const double top = area.OffsetY.value + area.OffsetY.fract / 65536.0;
-        if (left < 0 || top < 0 || area.Area.cx <= 0 || area.Area.cy <= 0 ||
-            left + area.Area.cx > width || top + area.Area.cy > height) {
-            return MF_E_INVALIDMEDIATYPE;
+        if (left >= 0 && top >= 0 && area.Area.cx > 0 && area.Area.cy > 0 &&
+            left + area.Area.cx <= width && top + area.Area.cy <= height) {
+            // D3D11 takes integer source rectangles. Round valid fractional
+            // apertures inward; unusable optional metadata keeps the full frame.
+            const int x = static_cast<int>(std::ceil(left));
+            const int y = static_cast<int>(std::ceil(top));
+            const int right = static_cast<int>(std::floor(left + area.Area.cx));
+            const int bottom = static_cast<int>(std::floor(top + area.Area.cy));
+            if (right > x && bottom > y) {
+                format.display_left = x;
+                format.display_top = y;
+                format.display_width = right - x;
+                format.display_height = bottom - y;
+            }
         }
-        // D3D11 takes integer source rectangles. Round inward so fractional
-        // apertures cannot expose pixels outside the valid image.
-        format.display_left = static_cast<int>(std::ceil(left));
-        format.display_top = static_cast<int>(std::ceil(top));
-        format.display_width = static_cast<int>(std::floor(left + area.Area.cx)) -
-                               format.display_left;
-        format.display_height = static_cast<int>(std::floor(top + area.Area.cy)) -
-                                format.display_top;
-        if (format.display_width <= 0 || format.display_height <= 0) {
-            return MF_E_INVALIDMEDIATYPE;
-        }
-    } else if (hr != MF_E_ATTRIBUTENOTFOUND) {
-        return hr;
     }
+    // Missing, malformed, oversized or wrongly typed apertures are advisory.
+    // Only an invalid mandatory frame size prevents playback.
 
     UINT32 numerator = 0, denominator = 0;
     if (SUCCEEDED(MFGetAttributeRatio(media_type, MF_MT_PIXEL_ASPECT_RATIO,

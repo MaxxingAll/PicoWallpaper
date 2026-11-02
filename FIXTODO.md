@@ -21,7 +21,7 @@ from source implementation.
 | 10. Hardware verification | Still open. |
 
 This candidate also addresses the review's visible-aperture and full-range/matrix
-findings. See `docs/P2-VALIDATION.md` for evidence and environment limitations.
+findings. See `docs/P2-VALIDATION.md` for CI evidence and pending hardware checks.
 
 Delete this file once every item is done.
 

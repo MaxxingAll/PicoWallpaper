@@ -13,6 +13,10 @@ bool CalculateVideoRectangles(const VideoFormat& format, UINT texture_width,
                               UINT texture_height, int output_width, int output_height,
                               int scaling_mode, RECT& source, RECT& destination);
 DXGI_COLOR_SPACE_TYPE VideoInputColorSpace(const VideoFormat& format, DXGI_FORMAT texture_format);
+bool SelectSupportedVideoColorSpace(ID3D11VideoProcessorEnumerator1* enumerator,
+                                    DXGI_FORMAT input_format,
+                                    DXGI_COLOR_SPACE_TYPE requested,
+                                    DXGI_COLOR_SPACE_TYPE& selected);
 
 class D3D11Presenter {
 public:
@@ -40,6 +44,7 @@ private:
     Microsoft::WRL::ComPtr<ID3D11VideoContext> m_video_context;
     Microsoft::WRL::ComPtr<ID3D11VideoContext1> m_video_context1;
     Microsoft::WRL::ComPtr<ID3D11VideoProcessorEnumerator> m_enumerator;
+    Microsoft::WRL::ComPtr<ID3D11VideoProcessorEnumerator1> m_enumerator1;
     Microsoft::WRL::ComPtr<ID3D11VideoProcessor> m_processor;
     Microsoft::WRL::ComPtr<ID3D11VideoProcessorOutputView> m_output_view;
     Microsoft::WRL::ComPtr<ID3D11Texture2D> m_input_texture;
@@ -51,6 +56,9 @@ private:
     int m_height = 0;
     UINT m_input_width = 0;
     UINT m_input_height = 0;
+    DXGI_FORMAT m_color_input_format = DXGI_FORMAT_UNKNOWN;
+    DXGI_COLOR_SPACE_TYPE m_requested_color_space = DXGI_COLOR_SPACE_CUSTOM;
+    DXGI_COLOR_SPACE_TYPE m_input_color_space = DXGI_COLOR_SPACE_CUSTOM;
 };
 
 } // namespace miniwp

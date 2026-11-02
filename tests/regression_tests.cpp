@@ -92,13 +92,41 @@ void VisibleGeometry() {
           "fractional aperture rounds inward");
 
     Aperture(type.Get(), MF_MT_MINIMUM_DISPLAY_APERTURE, 720, 480, 1);
-    Check(FAILED(ReadMFVideoFormat(type.Get(), format)), "reject out-of-frame aperture");
+    const auto full_frame = [&] {
+        Check(SUCCEEDED(ReadMFVideoFormat(type.Get(), format)), "ignore unusable aperture");
+        Check(format.display_left == 0 && format.display_top == 0 &&
+              format.display_width == 720 && format.display_height == 480,
+              "unusable aperture falls back to full frame");
+    };
+    full_frame();
     const UINT8 truncated[] = {0, 0};
     Check(SUCCEEDED(type->SetBlob(MF_MT_MINIMUM_DISPLAY_APERTURE, truncated, sizeof(truncated))),
           "set truncated aperture");
-    Check(FAILED(ReadMFVideoFormat(type.Get(), format)), "reject truncated aperture");
+    full_frame();
+    const UINT8 oversized[sizeof(MFVideoArea) + 1] = {};
+    Check(SUCCEEDED(type->SetBlob(MF_MT_MINIMUM_DISPLAY_APERTURE, oversized, sizeof(oversized))),
+          "set oversized aperture");
+    full_frame();
+    Check(SUCCEEDED(type->SetUINT32(MF_MT_MINIMUM_DISPLAY_APERTURE, 1)),
+          "set wrongly typed aperture");
+    full_frame();
+    Aperture(type.Get(), MF_MT_MINIMUM_DISPLAY_APERTURE, 704, 480, -1);
+    full_frame();
+    Aperture(type.Get(), MF_MT_MINIMUM_DISPLAY_APERTURE, 0, 480);
+    full_frame();
+    Aperture(type.Get(), MF_MT_MINIMUM_DISPLAY_APERTURE, 1, 1, 0, 0, 32768);
+    full_frame();
+    Check(SUCCEEDED(type->SetUINT32(MF_MT_VIDEO_NOMINAL_RANGE, MFNominalRange_0_255)),
+          "set color metadata alongside invalid aperture");
+    Check(SUCCEEDED(MFSetAttributeRatio(type.Get(), MF_MT_PIXEL_ASPECT_RATIO, 10, 11)),
+          "set aspect ratio alongside invalid aperture");
+    full_frame();
+    Check(format.range == VideoRange::Full && format.pixel_aspect_numerator == 10 &&
+          format.pixel_aspect_denominator == 11, "retain other metadata after aperture fallback");
     type = MediaType(0, 480);
     Check(FAILED(ReadMFVideoFormat(type.Get(), format)), "reject zero frame width");
+    type = MediaType(0xffffffffu, 480);
+    Check(FAILED(ReadMFVideoFormat(type.Get(), format)), "reject unrepresentable frame width");
     Check(ReadMFVideoFormat(nullptr, format) == E_POINTER, "reject null media type");
 }
 
@@ -163,6 +191,95 @@ void ColorMetadata() {
     // Re-reading a new type must not retain the previous stream's tags.
     Check(format.range == VideoRange::Unknown && format.matrix == VideoMatrix::Unknown,
           "clear stale color metadata");
+}
+
+// The selector uses the real COM method contract; this stub controls driver
+// answers without requiring video processing hardware on the CI runner.
+class ConversionEnumerator final : public ID3D11VideoProcessorEnumerator1 {
+public:
+    DXGI_COLOR_SPACE_TYPE preferred = DXGI_COLOR_SPACE_YCBCR_FULL_G22_LEFT_P2020;
+    bool preferred_supported = true;
+    bool fallback_supported = true;
+    HRESULT preferred_result = S_OK;
+    bool arguments_valid = true;
+    std::vector<DXGI_COLOR_SPACE_TYPE> checked;
+
+    HRESULT STDMETHODCALLTYPE CheckVideoProcessorFormatConversion(
+        DXGI_FORMAT input, DXGI_COLOR_SPACE_TYPE space, DXGI_FORMAT output,
+        DXGI_COLOR_SPACE_TYPE output_space, BOOL* supported) override {
+        arguments_valid = arguments_valid &&
+            (input == DXGI_FORMAT_NV12 || input == DXGI_FORMAT_B8G8R8A8_UNORM) &&
+            output == DXGI_FORMAT_B8G8R8A8_UNORM &&
+            output_space == DXGI_COLOR_SPACE_RGB_FULL_G22_NONE_P709;
+        checked.push_back(space);
+        *supported = (space == preferred ? preferred_supported : fallback_supported) ? TRUE : FALSE;
+        return space == preferred ? preferred_result : S_OK;
+    }
+    HRESULT STDMETHODCALLTYPE QueryInterface(REFIID, void** object) override {
+        *object = nullptr;
+        return E_NOINTERFACE;
+    }
+    ULONG STDMETHODCALLTYPE AddRef() override { return 2; }
+    ULONG STDMETHODCALLTYPE Release() override { return 1; }
+    void STDMETHODCALLTYPE GetDevice(ID3D11Device** device) override { *device = nullptr; }
+    HRESULT STDMETHODCALLTYPE GetPrivateData(REFGUID, UINT*, void*) override { return E_NOTIMPL; }
+    HRESULT STDMETHODCALLTYPE SetPrivateData(REFGUID, UINT, const void*) override { return E_NOTIMPL; }
+    HRESULT STDMETHODCALLTYPE SetPrivateDataInterface(REFGUID, const IUnknown*) override {
+        return E_NOTIMPL;
+    }
+    HRESULT STDMETHODCALLTYPE GetVideoProcessorContentDesc(
+        D3D11_VIDEO_PROCESSOR_CONTENT_DESC*) override { return E_NOTIMPL; }
+    HRESULT STDMETHODCALLTYPE CheckVideoProcessorFormat(DXGI_FORMAT, UINT*) override {
+        return E_NOTIMPL;
+    }
+    HRESULT STDMETHODCALLTYPE GetVideoProcessorCaps(D3D11_VIDEO_PROCESSOR_CAPS*) override {
+        return E_NOTIMPL;
+    }
+    HRESULT STDMETHODCALLTYPE GetVideoProcessorRateConversionCaps(
+        UINT, D3D11_VIDEO_PROCESSOR_RATE_CONVERSION_CAPS*) override { return E_NOTIMPL; }
+    HRESULT STDMETHODCALLTYPE GetVideoProcessorCustomRate(
+        UINT, UINT, D3D11_VIDEO_PROCESSOR_CUSTOM_RATE*) override { return E_NOTIMPL; }
+    HRESULT STDMETHODCALLTYPE GetVideoProcessorFilterRange(
+        D3D11_VIDEO_PROCESSOR_FILTER, D3D11_VIDEO_PROCESSOR_FILTER_RANGE*) override {
+        return E_NOTIMPL;
+    }
+};
+
+void DriverColorSupport() {
+    ConversionEnumerator driver;
+    DXGI_COLOR_SPACE_TYPE selected = DXGI_COLOR_SPACE_CUSTOM;
+    Check(SelectSupportedVideoColorSpace(&driver, DXGI_FORMAT_NV12, driver.preferred, selected) &&
+          selected == driver.preferred && driver.checked.size() == 1,
+          "use the requested supported conversion");
+    driver.preferred_supported = false;
+    driver.checked.clear();
+    Check(SelectSupportedVideoColorSpace(&driver, DXGI_FORMAT_NV12, driver.preferred, selected) &&
+          selected == DXGI_COLOR_SPACE_YCBCR_STUDIO_G22_LEFT_P709 && driver.checked.size() == 2,
+          "unsupported tagged YUV falls back to supported limited BT.709");
+    driver.preferred_supported = true;
+    driver.preferred_result = E_INVALIDARG;
+    Check(SelectSupportedVideoColorSpace(&driver, DXGI_FORMAT_NV12, driver.preferred, selected) &&
+          selected == DXGI_COLOR_SPACE_YCBCR_STUDIO_G22_LEFT_P709,
+          "query errors fall back even when the driver sets supported true");
+    driver.fallback_supported = false;
+    selected = DXGI_COLOR_SPACE_CUSTOM;
+    Check(!SelectSupportedVideoColorSpace(&driver, DXGI_FORMAT_NV12, driver.preferred, selected) &&
+          selected == DXGI_COLOR_SPACE_CUSTOM, "do not choose an unsupported fallback");
+    driver.preferred = DXGI_COLOR_SPACE_RGB_STUDIO_G22_NONE_P709;
+    driver.preferred_result = S_OK;
+    driver.preferred_supported = false;
+    driver.fallback_supported = true;
+    Check(SelectSupportedVideoColorSpace(&driver, DXGI_FORMAT_B8G8R8A8_UNORM,
+                                         driver.preferred, selected) &&
+          selected == DXGI_COLOR_SPACE_RGB_FULL_G22_NONE_P709,
+          "RGB fallback remains RGB");
+    driver.preferred = DXGI_COLOR_SPACE_YCBCR_STUDIO_G22_LEFT_P709;
+    driver.checked.clear();
+    Check(!SelectSupportedVideoColorSpace(&driver, DXGI_FORMAT_NV12, driver.preferred, selected) &&
+          driver.checked.size() == 1, "do not query identical candidates twice");
+    Check(!SelectSupportedVideoColorSpace(nullptr, DXGI_FORMAT_NV12, driver.preferred, selected),
+          "missing enumerator is not treated as support");
+    Check(driver.arguments_valid, "query the actual input/output format and color-space pair");
 }
 
 constexpr wchar_t kRunKey[] = L"Software\\Microsoft\\Windows\\CurrentVersion\\Run";
@@ -270,6 +387,7 @@ int main() {
     run("visible geometry", VisibleGeometry);
     run("pixel aspect ratio", PixelAspectRatio);
     run("color metadata", ColorMetadata);
+    run("driver color support", DriverColorSupport);
     run("startup reconciliation", StartupReconciliation);
     MFShutdown();
     CoUninitialize();

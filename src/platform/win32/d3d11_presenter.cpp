@@ -81,6 +81,31 @@ DXGI_COLOR_SPACE_TYPE VideoInputColorSpace(const VideoFormat& format, DXGI_FORMA
                 : DXGI_COLOR_SPACE_YCBCR_STUDIO_G22_LEFT_P709;
 }
 
+bool SelectSupportedVideoColorSpace(ID3D11VideoProcessorEnumerator1* enumerator,
+                                    DXGI_FORMAT input_format,
+                                    DXGI_COLOR_SPACE_TYPE requested,
+                                    DXGI_COLOR_SPACE_TYPE& selected) {
+    if (!enumerator) return false;
+    const bool yuv = input_format == DXGI_FORMAT_NV12 ||
+                     input_format == DXGI_FORMAT_P010 || input_format == DXGI_FORMAT_P016;
+    const DXGI_COLOR_SPACE_TYPE fallback = yuv
+        ? DXGI_COLOR_SPACE_YCBCR_STUDIO_G22_LEFT_P709
+        : DXGI_COLOR_SPACE_RGB_FULL_G22_NONE_P709;
+    const DXGI_COLOR_SPACE_TYPE candidates[] = {requested, fallback};
+    for (int i = 0; i < 2; ++i) {
+        if (i == 1 && requested == fallback) break;
+        BOOL supported = FALSE;
+        const HRESULT hr = enumerator->CheckVideoProcessorFormatConversion(
+            input_format, candidates[i], DXGI_FORMAT_B8G8R8A8_UNORM,
+            DXGI_COLOR_SPACE_RGB_FULL_G22_NONE_P709, &supported);
+        if (SUCCEEDED(hr) && supported) {
+            selected = candidates[i];
+            return true;
+        }
+    }
+    return false;
+}
+
 D3D11Presenter::~D3D11Presenter() {
     Cleanup();
 }
@@ -160,7 +185,9 @@ bool D3D11Presenter::CreateVideoProcessor(UINT input_width, UINT input_height) {
     ReleaseFrameResources();
     m_output_view.Reset();
     m_processor.Reset();
+    m_enumerator1.Reset();
     m_enumerator.Reset();
+    m_color_input_format = DXGI_FORMAT_UNKNOWN;
 
     D3D11_VIDEO_PROCESSOR_CONTENT_DESC content = {};
     content.InputFrameFormat = D3D11_VIDEO_FRAME_FORMAT_PROGRESSIVE;
@@ -174,7 +201,8 @@ bool D3D11Presenter::CreateVideoProcessor(UINT input_width, UINT input_height) {
     if (FAILED(m_video_device->CreateVideoProcessorEnumerator(
             &content, &m_enumerator)) ||
         FAILED(m_video_device->CreateVideoProcessor(m_enumerator.Get(), 0,
-                                                     &m_processor))) {
+                                                     &m_processor)) ||
+        FAILED(m_enumerator.As(&m_enumerator1))) {
         return false;
     }
 
@@ -242,6 +270,15 @@ bool D3D11Presenter::RenderFrame(const VideoFrame& frame, int scaling_mode) {
         return false;
     }
 
+    const DXGI_COLOR_SPACE_TYPE requested = VideoInputColorSpace(frame, texture_description.Format);
+    if (m_color_input_format != texture_description.Format ||
+        m_requested_color_space != requested) {
+        if (!SelectSupportedVideoColorSpace(m_enumerator1.Get(), texture_description.Format,
+                                            requested, m_input_color_space)) return false;
+        m_color_input_format = texture_description.Format;
+        m_requested_color_space = requested;
+    }
+
     D3D11_VIDEO_COLOR background = {};
     background.RGBA.A = 1.0f;
     const RECT output_rect = {0, 0, m_width, m_height};
@@ -252,7 +289,7 @@ bool D3D11Presenter::RenderFrame(const VideoFrame& frame, int scaling_mode) {
     m_video_context->VideoProcessorSetStreamFrameFormat(
         m_processor.Get(), 0, D3D11_VIDEO_FRAME_FORMAT_PROGRESSIVE);
     m_video_context1->VideoProcessorSetStreamColorSpace1(
-        m_processor.Get(), 0, VideoInputColorSpace(frame, texture_description.Format));
+        m_processor.Get(), 0, m_input_color_space);
     m_video_context1->VideoProcessorSetOutputColorSpace1(
         m_processor.Get(), DXGI_COLOR_SPACE_RGB_FULL_G22_NONE_P709);
     m_video_context->VideoProcessorSetStreamAutoProcessingMode(
@@ -279,6 +316,7 @@ bool D3D11Presenter::Resize(int width, int height) {
     if (!m_swap_chain || (width == m_width && height == m_height)) return false;
     ReleaseFrameResources();
     m_output_view.Reset();
+    m_enumerator1.Reset();
     m_enumerator.Reset();
     m_processor.Reset();
     m_input_width = 0;
@@ -305,6 +343,7 @@ void D3D11Presenter::Cleanup() {
     m_output_view.Reset();
     ReleaseFrameResources();
     m_processor.Reset();
+    m_enumerator1.Reset();
     m_enumerator.Reset();
     m_video_context1.Reset();
     m_video_context.Reset();
@@ -317,6 +356,9 @@ void D3D11Presenter::Cleanup() {
     m_height = 0;
     m_input_width = 0;
     m_input_height = 0;
+    m_color_input_format = DXGI_FORMAT_UNKNOWN;
+    m_requested_color_space = DXGI_COLOR_SPACE_CUSTOM;
+    m_input_color_space = DXGI_COLOR_SPACE_CUSTOM;
 }
 
 } // namespace miniwp

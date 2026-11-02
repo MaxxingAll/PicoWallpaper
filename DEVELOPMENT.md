@@ -19,6 +19,11 @@ The presenter creates an `ID3D11VideoProcessorInputView` on that slice and blits
 directly to the swap-chain back buffer. No CPU pixel conversion, runtime shader
 compiler, or intermediate shader texture is used.
 
+Malformed optional aperture data falls back to the full frame. Color conversions
+are checked against the driver's video-processor enumerator, with limited-range
+BT.709 as the YUV fallback (full-range RGB for RGB textures). The chosen conversion
+is cached until the input format, requested color space or processor changes.
+
 ## Build
 
 Use a Visual Studio 2022 developer shell:
@@ -49,6 +54,9 @@ and fractional apertures, aperture precedence, non-square pixels, full/studio
 range and tagged matrices. Startup tests redirect HKCU inside the test process
 to a temporary test key, which is removed afterward; they never change the real
 Run entry. Checks remain active in Release builds.
+
+A COM enumerator stub also tests supported, unsupported and failed driver
+conversion queries, including RGB/YUV fallback and an unsupported baseline.
 
 Both configurations run in CI. The release workflow also runs CTest before
 staging an executable. Set `-DBUILD_TESTING=OFF` to build only the application.
