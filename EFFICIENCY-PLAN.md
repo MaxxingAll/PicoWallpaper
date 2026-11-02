@@ -13,7 +13,7 @@ Owner priority: tiny footprint and efficiency. A Rust rewrite was assessed and r
 4. **Evidence:** every task ends with its *Done when* checks. Record the CI run id, exact byte sizes and test
    results in the status table at the bottom. Hardware measurements (CPU, wake-ups, GPU memory, visuals) are done by
    the owner: leave those cells `Pending (owner)`; never estimate them as results.
-5. **Owner decisions:** tasks marked **Gate D1/D2/D3** wait until the decision cell in the table is filled.
+5. **Owner decisions:** D1–D3 are decided (see the table). Tasks marked *dropped* must not be implemented.
 6. **YAGNI:** no new settings, INI keys, abstractions or refactors beyond the task. Each commit has a one-line reason.
    Conventional commit prefixes: `perf:`, `ci:`, `docs:`, `test:`.
 7. **Unknowns:** write `UNCLEAR: <question>` in the status table instead of guessing; continue with the next task.
