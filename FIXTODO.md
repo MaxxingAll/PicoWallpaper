@@ -9,7 +9,7 @@ from source implementation.
 
 | Item | Status |
 |---|---|
-| 1. Build includes | Landed on main. Candidate Debug/Release builds and regression tests pass CI run 41418443319; Release size 582144 bytes. |
+| 1. Build includes | Landed on main. Candidate Debug/Release builds and regression tests pass CI run 41420857926; Release size 583168 bytes. |
 | 2. Unicode INI | Landed on main; hardware/manual acceptance remains pending. |
 | 3. Explorer restart | Landed on main; hardware/manual acceptance remains pending. |
 | 4. Device recovery | Landed on main; this candidate also detects loss during suspend and failed decoder open. GPU-reset validation pending. |
