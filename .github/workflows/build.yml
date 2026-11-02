@@ -39,8 +39,6 @@ jobs:
           $exe = 'build/Release/LiteWallpaper-MF.exe'
           & $dumpbin /headers $exe
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
-          & $dumpbin /disasm:nobytes /out:release-disasm.txt $exe
-          if ($LASTEXITCODE) { exit $LASTEXITCODE }
           & $dumpbin /imports $exe | Select-String '^\s+\S+\.dll\s*$' | ForEach-Object { $_.Line.Trim() }
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
       - name: Upload Release linker map
@@ -51,10 +49,3 @@ jobs:
           path: build/Release/LiteWallpaper-MF.map
           if-no-files-found: error
           retention-days: 7
-      - name: Save diagnostic disassembly for the map comparison
-        if: matrix.configuration == 'Release'
-        uses: actions/upload-artifact@v4
-        with:
-          name: release-disasm
-          path: release-disasm.txt
-          retention-days: 1
