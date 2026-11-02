@@ -49,3 +49,20 @@ jobs:
           path: build/Release/LiteWallpaper-MF.map
           if-no-files-found: error
           retention-days: 7
+      - name: Trace retained static CRT objects
+        if: matrix.configuration == 'Release'
+        shell: pwsh
+        run: |
+          cmake -B build -S . '-DCMAKE_EXE_LINKER_FLAGS_RELEASE=/INCREMENTAL:NO /VERBOSE:LIB /VERBOSE:REF'
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          cmake --build build --config Release --target LiteWallpaperMF -- /v:diag *> link-trace.txt
+          if ($LASTEXITCODE) { Get-Content link-trace.txt -Tail 100; exit 1 }
+          Select-String -Path link-trace.txt -Pattern 'Loaded .*\((output|default_local_stdio_options|console_output_initializer|printf_count_output)\.obj\)' -Context 2,0 | Select-Object -First 100
+          Select-String -Path link-trace.txt -Pattern 'Discarded .*(__stdio_common_v|output_processor|__local_stdio_printf_options)' | Select-Object -First 30
+      - name: Save CRT diagnostic trace
+        if: matrix.configuration == 'Release'
+        uses: actions/upload-artifact@v4
+        with:
+          name: crt-link-trace
+          path: link-trace.txt
+          retention-days: 1
