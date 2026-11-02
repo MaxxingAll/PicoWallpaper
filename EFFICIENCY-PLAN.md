@@ -47,7 +47,7 @@ Owner priority: tiny footprint and efficiency. A Rust rewrite was assessed and r
 
 ## Phase 1 — Executable size (branch `perf/p1-size`)
 
-Estimate (assumed): 583 KB → about 150–250 KB after P1.1–P1.4.
+Estimate (assumed): 583 KB → about 250–300 KB after P1.1–P1.3. The CRT stays fully static (D1: No).
 
 ### P1.1 Remove the duplicate icon resource
 - **Where:** `src/app.rc` line 2 (`101 ICON "../assets/app.ico"`).
@@ -72,13 +72,8 @@ Estimate (assumed): 583 KB → about 150–250 KB after P1.1–P1.4.
 - **Done when:** the P0.1 map no longer lists CRT printf/stdio formatting objects; the size delta is recorded;
   tests green.
 
-### P1.4 Hybrid CRT — **Gate D1**
-- **Where:** `CMakeLists.txt`.
-- **Change:** keep the static VC runtime (`/MT`), link the Universal CRT dynamically: Release adds
-  `/NODEFAULTLIB:libucrt.lib ucrt.lib`, Debug `/NODEFAULTLIB:libucrtd.lib ucrtd.lib`. `ucrtbase.dll` ships with
-  Windows 10/11, so no redistributable is needed.
-- **Done when:** imports (P0.1) show only Windows system DLLs plus `api-ms-win-crt-*`; no `vcruntime*`/`msvcp*`;
-  size delta recorded; the owner runs the exe on a clean Windows 10 22H2 install.
+### P1.4 Hybrid CRT — dropped (owner D1: No)
+Do not change the CRT linkage. The exe keeps the fully static CRT (`/MT`) and imports no `api-ms-win-crt-*` DLLs.
 
 ## Phase 3 — CPU and wake-ups (branch `perf/p3-cpu`)
 
@@ -118,28 +113,47 @@ Starts after the P0.3 baseline. Each task needs an owner before/after measuremen
 
 ## Phase 4 — GPU memory (branch `perf/p4-gpu`)
 
-### P4.1 Release the GPU during automatic pauses — **Gate D3**
-- **Where:** `src/main.cpp:172-187` (`EnterSuspend`/`LeaveSuspend`), `:555-562`, the recovery timer `:534-550`.
-- **Why:** during fullscreen/maximised/lock/sleep pauses the desktop is not visible, yet the device, the decoder
-  pool and two desktop-sized back buffers stay allocated (e.g. 2 × 33 MB at 4K).
-- **Change:** governor pauses (`Paused`, `Occluded`, `Sleeping`) do a deep suspend: close the decoder, hide the render
-  window, `g_presenter.Cleanup()`, keep the window attached. Leaving a deep suspend calls `RebuildGraphics(true)`
-  (resumes at `g_playback_seconds`). Manual pause keeps today's behaviour (still frame stays visible). The recovery
-  timer must not rebuild graphics while deep-suspended; `WM_DISPLAYCHANGE` must still resize the window.
-- **Done when:** the owner measures ≈ 0 dedicated/shared GPU memory for the process during a fullscreen pause; video
-  returns ≤ 300 ms after un-maximising at the same position; Explorer restart and GPU reset during a deep pause
-  recover.
+### P4.1 Release the GPU during automatic pauses, show a snapshot (owner D3: Yes, with snapshot)
+- **Where:** `src/main.cpp:172-187` (`EnterSuspend`/`LeaveSuspend`), `:189-241` (`RenderNextFrame`), `:266-282`
+  (`ResizeToDesktop`), `:284-314` (`RebuildGraphics`), `:393-400` (`WindowProc`), `:555-562`, the recovery timer
+  `:534-550`; `src/platform/win32/d3d11_presenter.*`.
+- **Why:** during fullscreen/maximised/lock/sleep pauses the device, the decoder pool and two desktop-sized back
+  buffers stay allocated (e.g. 2 × 33 MB at 4K). With pause-on-maximised the desktop can still be visible on another
+  monitor, so the wallpaper must keep its picture.
+- **Owner requirement:** the normal Windows wallpaper must never become visible: not while paused, not while the
+  GPU is released, and not during resume. The paused picture is the last frame at full desktop resolution (D2: No,
+  no reduced quality).
+- **Change:**
+  1. **Capture** — add `D3D11Presenter::CaptureFrame(const VideoFrame&, int scaling_mode, <snapshot out>)`. With
+     `FLIP_DISCARD` the presented buffer is undefined, so render `g_frame` again into the back buffer (no `Present`),
+     `CopyResource` it to a `D3D11_USAGE_STAGING` BGRA texture, `Map`, and copy the rows into a top-down 32-bit
+     `CreateDIBSection` bitmap owned by `main.cpp`. Release the staging texture right after.
+  2. **Deep suspend** — governor pauses (`Paused`, `Occluded`, `Sleeping`) only: capture while the decoder and
+     `g_frame` are still valid, then close the decoder, `g_presenter.Cleanup()`, keep the render window **shown and
+     attached**, and repaint it from the snapshot (`InvalidateRect` + `UpdateWindow`). If capture fails, fall back
+     to today's suspend (keep the device and the still frame); never release the GPU without a picture.
+  3. **Painting** — `WindowProc` handles `WM_ERASEBKGND` (return 1) and `WM_PAINT`: while a snapshot exists,
+     `StretchDIBits` it to the client area (stretches if the desktop size changed during the pause).
+  4. **Resume** — `RebuildGraphics(true)` and `ResizeToDesktop` must not `ShowWindow(SW_HIDE)` while a snapshot
+     exists (today they hide at lines 280 and 296). Playback resumes at `g_playback_seconds`, so the first new frame
+     matches the snapshot. Free the snapshot only after the first successful `Present`.
+  5. **Recovery** — the recovery timer must not rebuild graphics while deep-suspended. If Explorer restarts during
+     the pause the render window is recreated without the snapshot; that case may show the wallpaper until resume
+     (document it).
+  6. **Manual pause** keeps today's behaviour (device and still frame stay).
+  7. If GDI painting on the former swap-chain window flashes black or shows the wallpaper on the owner's hardware,
+     paint the snapshot in a separate sibling child window placed over the render window instead; write `UNCLEAR:`
+     with the observation before switching.
+- **Cost:** the snapshot uses CPU memory of desktop width × height × 4 bytes while paused (Estimate (assumed): 8 MB at
+  1080p, 33 MB at 4K, 17 MB for a 2 × 1080p span), instead of the GPU memory it replaces. Update the paused-memory
+  target in `docs/BENCHMARK.md` to "< 1 MB + snapshot size".
+- **Done when:** the owner sees no wallpaper flash and no black frame when pausing, while paused (second monitor with
+  pause-on-maximised) and when resuming; ≈ 0 dedicated/shared GPU memory for the process during a fullscreen pause;
+  video resumes ≤ 300 ms after un-maximising at the snapshot's position; capture failure falls back to the normal
+  suspend; Explorer restart and GPU reset during a deep pause recover.
 
-### P4.2 Back buffer no larger than the video — **Gate D2**
-- **Where:** `d3d11_presenter.cpp` `CreateSwapChain` (149), `Resize` (313), `RenderFrame`; `main.cpp`
-  `ResizeToDesktop` (266).
-- **Change:** separate window size from back-buffer size. Add a pure `ChooseBackBufferSize(format, desktop_w,
-  desktop_h, scaling_mode)` (unit-tested) that scales the desktop size down by
-  `s = min(1, max(source_w / dest_w, source_h / dest_h))`, rounded up, with the rects from `CalculateVideoRectangles`.
-  Keep `DXGI_SCALING_STRETCH` so DWM stretches the buffer to the window. Recompute on video change, scaling-mode
-  change and desktop resize.
-- **Done when:** tests cover 1080p video on 4K (→ 1920×1080), 4K video on 1080p (→ 1920×1080), cover/fit/stretch
-  on ultrawide and two-monitor spans; the owner compares screenshots and records GPU memory before/after.
+### P4.2 Back buffer no larger than the video — dropped (owner D2: No)
+Do not change the back-buffer size. The swap chain stays at full desktop size.
 
 ### P4.3 Decoder surface pool — experiment, after the baseline
 - **Where:** `src/decoder/mf_decoder.cpp` `Open` (around 248-290).
@@ -180,9 +194,9 @@ Rust rewrite, per-monitor video, playlists, audio, HDR, FIXTODO 6 (tray double-c
 
 | Id | Question | Decision |
 |---|---|---|
-| D1 | Hybrid CRT: link `ucrtbase.dll` (part of Windows 10/11) instead of a fully static CRT? | Pending |
-| D2 | Back buffer ≤ video size: accept DWM's slightly softer upscale for less GPU memory and bandwidth? | Pending |
-| D3 | Deep pause: accept a brief static Windows wallpaper (~100–300 ms) when playback resumes? | Pending |
+| D1 | Hybrid CRT: link `ucrtbase.dll` (part of Windows 10/11) instead of a fully static CRT? | **No** (2026-11-02): P1.4 dropped |
+| D2 | Back buffer ≤ video size: accept DWM's slightly softer upscale for less GPU memory and bandwidth? | **No** (2026-11-02): P4.2 dropped |
+| D3 | Deep pause: release the GPU during automatic pauses? | **Yes, with a full-resolution snapshot** (2026-11-02): the normal wallpaper must never show; see P4.1 |
 
 ## Status
 
@@ -194,12 +208,12 @@ Rust rewrite, per-monitor video, playlists, audio, HDR, FIXTODO 6 (tray double-c
 | P1.1 | | | | Pending (owner) |
 | P1.2 | | | | Pending (owner) |
 | P1.3 | | | | — |
-| P1.4 | | | | Gate D1 |
+| P1.4 | — | — | Dropped (D1: No) | — |
 | P3.1 | | | | Pending (owner) |
 | P3.2 | | | | Pending (owner) |
 | P3.3 | | | | Pending (owner) |
-| P4.1 | | | | Gate D3 |
-| P4.2 | | | | Gate D2 |
+| P4.1 | | | | Pending (owner) |
+| P4.2 | — | — | Dropped (D2: No) | — |
 | P4.3 | | | | Pending (owner) |
 | P5.1 | | | | Pending (owner) |
 | P5.2 | | | | — |
