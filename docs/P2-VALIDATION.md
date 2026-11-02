@@ -3,14 +3,24 @@
 Base: main `f0337c8`. Scope: the six findings from the main-branch review.
 The previous session's partial changes are preserved in this candidate.
 
+## CI result
+
+Code commit `9af78c7` on `fix/p2-review` passed the Windows Debug and Release
+builds and CTest (1/1 regression executable in each configuration) in
+[run 41418443319](https://github.com/MaxxingAll/PicoWallpaper/actions/runs/41418443319).
+Release executable size is **582144 bytes**, below the **1572864-byte** budget.
+The existing ten C4245 decoder stream-enum conversion warnings appear in both
+configurations; that FIXTODO cleanup remains open. These tests do not exercise
+live decoding, rendered pixels, device loss or desktop/shell recovery.
+
 | Finding | Candidate behavior | Verification |
 |---|---|---|
 | P1: lost device during pause | Check device health before opening, after failed open and on the recovery timer, including while suspended. Recovery attempts remain retryable. | Source tracing; live reset/resume test pending. |
-| P2: texture padding | Carry frame dimensions, visible aperture and pixel aspect ratio to the presenter. Compute cover/fit/stretch from the aperture, retaining texture dimensions only for GPU allocation checks. | CTest cases added for 1920x1080 in 1920x1088, offset apertures, fractional offsets, malformed metadata and 4:3 non-square pixels. Execution pending. |
-| P2: full-range/matrix conversion | Read range and matrix from the current output media type; set explicit D3D11 input and full-range RGB output color spaces. Use the SD/HD heuristic only when matrix metadata is missing. | CTest cases added for full/studio range, BT.601, BT.709, BT.2020 and BGRA. Execution and rendered color checks pending. |
+| P2: texture padding | Carry frame dimensions, visible aperture and pixel aspect ratio to the presenter. Compute cover/fit/stretch from the aperture, retaining texture dimensions only for GPU allocation checks. | Debug/Release CTest passed: 1920x1080 in 1920x1088, offset apertures, fractional offsets, malformed metadata and 4:3 non-square pixels. Rendered checks pending. |
+| P2: full-range/matrix conversion | Read range and matrix from the current output media type; set explicit D3D11 input and full-range RGB output color spaces. Use the SD/HD heuristic only when matrix metadata is missing. | Debug/Release CTest passed: full/studio range, BT.601, BT.709, BT.2020 and BGRA. Rendered color checks pending. |
 | P2: repeated decode dialogs | Remember failed file paths, block automatic reopen, and clear the failure only after success or deliberate video selection. Device-loss failures stay on the recovery path. | Source tracing; missing-codec/corrupt-file pause cycles pending. |
-| P2: Debug build flags | Restrict optimization and LTCG flags to Release. | Debug and Release CTest matrix added to CI; builds pending. |
-| P2: deleted Run entry | Disable the saved flag if the Run value was removed; repair the command if the executable moved; preserve the setting on registry errors. | Process-isolated registry tests added; execution pending. |
+| P2: Debug build flags | Restrict optimization and LTCG flags to Release. | Debug and Release CI builds and CTest passed. |
+| P2: deleted Run entry | Disable the saved flag if the Run value was removed; repair the command if the executable moved; preserve the setting on registry errors. | Process-isolated registry tests passed in Debug and Release. |
 
 ## Geometry contract
 
@@ -32,7 +42,8 @@ HDR/tone mapping remains outside this review fix.
 - The shared-repo pull failed while opening `.git/FETCH_HEAD` for writing.
   No shared instruction or memory files were changed.
 - No MSVC/Clang/GCC toolchain, CMake or Windows SDK headers were found locally.
-  No C++ build, CTest run, executable-size measurement or hardware test is claimed.
+  Builds, CTest and the size measurement were performed by Windows CI, as linked
+  above. No local C++ build or hardware test is claimed.
 - `git diff --check` passed for the complete candidate, including new source and
   test files. This checks patch whitespace; it does not validate C++ behavior.
 - Initial GitHub access failed with `WinError 10061` before authentication.
@@ -44,6 +55,6 @@ HDR/tone mapping remains outside this review fix.
   Review the candidate diff against `f0337c8` and compare any later source changes
   before applying it. All commits/pushes must use the configured `gpt-chan[bot]`.
 
-Next: build and run CTest in Debug and Release, check the 1,572,864-byte Release
-budget, then run GPU-reset/resume, corrupt-video retry and rendered padding/color
-checks. Benchmarks and a release tag are separate pending work.
+Next: review/merge the branch, then run GPU-reset/resume, corrupt-video retry and
+rendered padding/color checks. Benchmarks and a release tag are separate pending
+work.

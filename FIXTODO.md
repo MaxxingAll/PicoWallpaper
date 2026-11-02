@@ -9,14 +9,14 @@ from source implementation.
 
 | Item | Status |
 |---|---|
-| 1. Build includes | Landed on main; previous Release CI green. New Debug/Release matrix still needs a run. |
+| 1. Build includes | Landed on main. Candidate Debug/Release builds and regression tests pass CI run 41418443319; Release size 582144 bytes. |
 | 2. Unicode INI | Landed on main; hardware/manual acceptance remains pending. |
 | 3. Explorer restart | Landed on main; hardware/manual acceptance remains pending. |
 | 4. Device recovery | Landed on main; this candidate also detects loss during suspend and failed decoder open. GPU-reset validation pending. |
 | 5. Repeated error dialogs | Candidate remembers failed paths; deliberate Choose video clears the failure. Manual verification pending. |
 | 6. Tray double-click | Still open. |
-| 7. Deleted autostart entry | Candidate reconciles the saved flag with the Run value; process-isolated registry tests added, not yet executed. |
-| 8. Build flags and warnings | Candidate limits optimization flags to Release. Decoder enum-conversion warnings remain open. |
+| 7. Deleted autostart entry | Candidate reconciles the saved flag with the Run value; process-isolated registry tests pass in Debug and Release. |
+| 8. Build flags and warnings | Candidate limits optimization flags to Release; Debug/Release builds pass. Ten decoder enum-conversion warnings per configuration remain open. |
 | 9. Upstream docs/names | Still open; benchmark results remain Pending. |
 | 10. Hardware verification | Still open. |
 
