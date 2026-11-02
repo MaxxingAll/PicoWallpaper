@@ -1,13 +1,17 @@
 # EFFICIENCY-PLAN
 
-Goal: a smaller executable and lower CPU, wake-up and GPU-memory use, with no feature change.
-Base: `main` @ `0511172` (2026-11-02). Line numbers below refer to that commit.
+Goal: rename the app to PicoWallpaper (Phase R), then a smaller executable and lower CPU, wake-up and GPU-memory
+use, with no feature change.
+Base: `main` @ `0511172` (2026-11-02). Line numbers below refer to that commit; after Phase R, locate code by the
+function names given (the rename shifts a few lines).
 Owner priority: tiny footprint and efficiency. A Rust rewrite was assessed and rejected (no gain); do not propose it.
 
 ## Rules for the agent
 
-1. **Order:** work phase by phase, top to bottom. One branch per phase (`perf/p0-measure`, `perf/p1-size`,
-   `perf/p3-cpu`, `perf/p4-gpu`, `perf/p5-decode`), one PR per branch. Do not merge; the owner merges after review.
+1. **Order:** work phase by phase, top to bottom. One branch per phase (`chore/rename-picowallpaper`,
+   `perf/p0-measure`, `perf/p1-size`, `perf/p3-cpu`, `perf/p4-gpu`, `perf/p5-decode`), one PR per branch, each PR
+   targeting `main`. Do not merge; the owner merges after review. If the previous phase's PR is not merged yet,
+   branch from that phase's branch and say so at the top of the PR description (the owner merges in order).
 2. **Identity:** GitHub writes only through your own GitHub App identity (agent-brain `AGENTS.md` §8). Never the owner's login.
 3. **Builds:** the owner's PC has no MSVC/CMake. GitHub Actions CI is the build and test system. Never claim a local build.
 4. **Evidence:** every task ends with its *Done when* checks. Record the CI run id, exact byte sizes and test
@@ -15,12 +19,51 @@ Owner priority: tiny footprint and efficiency. A Rust rewrite was assessed and r
    the owner: leave those cells `Pending (owner)`; never estimate them as results.
 5. **Owner decisions:** D1–D3 are decided (see the table). Tasks marked *dropped* must not be implemented.
 6. **YAGNI:** no new settings, INI keys, abstractions or refactors beyond the task. Each commit has a one-line reason.
-   Conventional commit prefixes: `perf:`, `ci:`, `docs:`, `test:`.
+   Conventional commit prefixes: `perf:`, `ci:`, `docs:`, `test:`, `chore:` (rename).
 7. **Unknowns:** write `UNCLEAR: <question>` in the status table instead of guessing; continue with the next task.
 8. **Constraints that stay:** Windows 10/11 only, C++20/MSVC, no package manager, no bundled codecs, no runtime
    dependency outside Windows, Release exe ≤ 1,572,864 bytes, Debug and Release CTest green.
 9. **New pure logic gets a unit test** in `tests/regression_tests.cpp` (the test target already links the presenter
    and format helpers; add `src/core/playback_clock.cpp` to it when P3.1 needs it).
+
+## Phase R — Rename to PicoWallpaper (branch `chore/rename-picowallpaper`)
+
+The GitHub repository is already `MaxxingAll/PicoWallpaper`; the code still uses `LiteWallpaper-MF`,
+`LiteWallpaperMF`, `MiniWallpaper` and the namespace `miniwp`. Inventory: `git grep -n -i -E
+"litewallpaper|miniwallpaper|miniwp"` (about 60 hits plus 41 `miniwp` lines on `0511172`).
+
+### R1 Rename everything
+- **Where and change:**
+
+  | Old | New | Where |
+  |---|---|---|
+  | exe `LiteWallpaper-MF.exe` | `PicoWallpaper.exe` | `CMakeLists.txt` `OUTPUT_NAME`; both workflows (size check, staging, checksum, attestation, release assets) |
+  | CMake `project(LiteWallpaperMF …)`, targets `LiteWallpaperMF` / `LiteWallpaperTests`, `FATAL_ERROR` texts | `PicoWallpaper`, `PicoWallpaper` / `PicoWallpaperTests` | `CMakeLists.txt` |
+  | namespace `miniwp` | `picowp` | every file under `src/` and `tests/` |
+  | window classes `LiteWallpaperMFWindow`, `LiteWallpaperMFControl`, `MiniWallpaper_MsgReceiver` | `PicoWallpaperWindow`, `PicoWallpaperControl`, `PicoWallpaper_MsgReceiver` | `main.cpp:53-54`, `desktop_injector.cpp:193,199`; the class-name check in `power_governor.cpp:24` must use the same constant as `main.cpp` (share one constant so they cannot drift) |
+  | window titles, message-box titles, tray tooltip, debug-log prefix `LiteWallpaper-MF` | `PicoWallpaper` | `main.cpp:94,163,323,498,508`, `tray_icon.cpp:45`, `mf_decoder.cpp:87` |
+  | instance mutex `Local\LiteWallpaper-MF.Instance` | `Local\PicoWallpaper.Instance` | `main.cpp:448` |
+  | config folder `%APPDATA%\LiteWallpaper-MF` | `%APPDATA%\PicoWallpaper` | `config.cpp:96` |
+  | Run value `LiteWallpaper-MF` | `PicoWallpaper` | `startup.cpp:11`, tests |
+  | docs | PicoWallpaper | `README.md`, `ROADMAP.md` (title, config path), `DEVELOPMENT.md`, `docs/BENCHMARK.md`, this plan; `FIXTODO.md:300-301` (exe name) |
+
+- **Migration for existing users (required):**
+  1. *Config:* on load, if `%APPDATA%\PicoWallpaper\config.ini` does not exist and
+     `%APPDATA%\LiteWallpaper-MF\config.ini` does, copy it (`CopyFileW`, fail if exists). Never delete or change the
+     old folder. Put the copy in a small function that takes both folder paths, so a test can run it on a temp folder.
+  2. *Autostart:* at startup, before `ReconcileRunAtStartup`: if the legacy Run value `LiteWallpaper-MF` exists,
+     delete it; if the (migrated) setting `run_on_startup` is on, write the new `PicoWallpaper` value. Then reconcile
+     as today. Add isolated-registry tests (existing `IsolatedRegistry` pattern) for: legacy present + enabled →
+     only the new value remains; legacy present + disabled → no value remains; no legacy → behaviour unchanged.
+  3. Keep the legacy names only as clearly named constants used by the migration code.
+- **Keep unchanged:** upstream attribution and links (`f4rdani/LiteWallpaper` in `README.md:8`, `ROADMAP.md:3`),
+  `LICENSE`, and historical review text in `FIXTODO.md` (except lines 300-301) and `docs/P2-VALIDATION.md`.
+  Do not rename the GitHub repository or the owner's local folders.
+- **Done when:** CI is green in Debug and Release and the artifact is `build/Release/PicoWallpaper.exe`;
+  `git grep -n -i -E "litewallpaper|miniwallpaper|miniwp"` returns only the upstream attribution, the legacy
+  migration constants and their tests, and the historical files listed above (list the remaining hits in the PR);
+  migration tests pass; the owner confirms on their PC: settings and autostart carry over from the old version, the
+  tray shows "PicoWallpaper", and only one Run value exists.
 
 ## Phase 0 — Measurement (branch `perf/p0-measure`)
 
@@ -28,7 +71,7 @@ Owner priority: tiny footprint and efficiency. A Rust rewrite was assessed and r
 - **Where:** `CMakeLists.txt` link options (Release), `.github/workflows/build.yml` (Release job).
 - **Change:** add `/MAP` to the Release link options. Add a CI step (Release only) that finds `dumpbin.exe` via
   `vswhere` (no new third-party action) and prints `dumpbin /headers` section sizes and `dumpbin /imports` DLL names
-  for `build/Release/LiteWallpaper-MF.exe`. Upload the `.map` file with `actions/upload-artifact@v4`, retention 7 days.
+  for `build/Release/PicoWallpaper.exe` (the name after R1). Upload the `.map` file with `actions/upload-artifact@v4`, retention 7 days.
 - **Done when:** the CI log shows section sizes and the imported DLL list; the map artifact downloads.
 
 ### P0.2 Fix the benchmark method
@@ -202,6 +245,7 @@ Rust rewrite, per-monitor video, playlists, audio, HDR, FIXTODO 6 (tray double-c
 
 | Task | Branch / PR | CI run | Result (bytes, tests) | Owner measurement |
 |---|---|---|---|---|
+| R1 | | | | Pending (owner) |
 | P0.1 | | | | — |
 | P0.2 | | | | — |
 | P0.3 | — | — | — | Pending (owner) |
