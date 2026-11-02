@@ -1,10 +1,10 @@
 #include "config.h"
+#include "number_format.h"
 
 #include <windows.h>
 #include <shlobj.h>
 
 #include <algorithm>
-#include <cwchar>
 
 namespace miniwp {
 namespace {
@@ -39,9 +39,8 @@ bool ReadBool(const wchar_t* key, bool fallback, const std::wstring& path) {
 }
 
 bool WriteInt(const wchar_t* key, int value, const std::wstring& path) {
-    wchar_t buffer[32] = {};
-    swprintf_s(buffer, _countof(buffer), L"%d", value);
-    return WritePrivateProfileStringW(L"settings", key, buffer,
+    const std::wstring formatted = IntDecimal(value);
+    return WritePrivateProfileStringW(L"settings", key, formatted.c_str(),
                                       path.c_str()) != FALSE;
 }
 

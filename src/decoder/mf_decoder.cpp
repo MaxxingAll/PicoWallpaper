@@ -4,6 +4,7 @@
 
 #include "mf_decoder.h"
 #include "mf_video_format.h"
+#include "core/number_format.h"
 
 #include <mfapi.h>
 #include <mferror.h>
@@ -12,7 +13,6 @@
 
 #include <algorithm>
 #include <cmath>
-#include <cstdio>
 #include <cwctype>
 
 namespace miniwp {
@@ -76,13 +76,6 @@ const char* CodecInstallHint(const std::wstring& path, const std::string& codec)
     return "Install the Windows codec extension required by this video, then try again.";
 }
 
-std::string HResultHex(HRESULT hr) {
-    char buffer[16] = {};
-    std::snprintf(buffer, sizeof(buffer), "0x%08lX",
-                  static_cast<unsigned long>(hr));
-    return buffer;
-}
-
 void DebugLog(const std::string& message) {
     OutputDebugStringA("LiteWallpaper-MF: ");
     OutputDebugStringA(message.c_str());
@@ -96,7 +89,7 @@ MFDecoder::~MFDecoder() {
 }
 
 void MFDecoder::SetError(HRESULT hr, const char* operation) {
-    m_last_error = std::string(operation) + " failed (" + HResultHex(hr) + ").";
+    m_last_error = std::string(operation) + " failed (" + HResultHex(static_cast<uint32_t>(hr)) + ").";
     if (hr == MF_E_TOPO_CODEC_NOT_FOUND || hr == MF_E_INVALIDMEDIATYPE ||
         hr == MF_E_UNSUPPORTED_BYTESTREAM_TYPE) {
         m_last_error += ' ';
