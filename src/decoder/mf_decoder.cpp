@@ -3,6 +3,7 @@
 #endif
 
 #include "mf_decoder.h"
+#include "mf_video_format.h"
 
 #include <mfapi.h>
 #include <mferror.h>
@@ -165,12 +166,10 @@ bool MFDecoder::ReadVideoInfo() {
         return false;
     }
 
-    UINT32 width = 0;
-    UINT32 height = 0;
-    if (SUCCEEDED(MFGetAttributeSize(current_type.Get(), MF_MT_FRAME_SIZE,
-                                     &width, &height))) {
-        m_info.width = static_cast<int>(width);
-        m_info.height = static_cast<int>(height);
+    hr = ReadMFVideoFormat(current_type.Get(), m_info);
+    if (FAILED(hr)) {
+        SetError(hr, "Reading visible video geometry and color metadata");
+        return false;
     }
 
     UINT32 fps_numerator = 0;
@@ -363,8 +362,7 @@ bool MFDecoder::DecodeNextFrame(VideoFrame& frame) {
             frame.texture = texture.Get();
             frame.texture_index = static_cast<int>(subresource);
             frame.pts = sample_time / 10;
-            frame.width = m_info.width;
-            frame.height = m_info.height;
+            static_cast<VideoFormat&>(frame) = m_info;
             m_last_error.clear();
             return true;
         }

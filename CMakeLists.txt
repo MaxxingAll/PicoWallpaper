@@ -17,9 +17,11 @@ add_executable(LiteWallpaperMF WIN32
     src/core/config.cpp
     src/core/playback_clock.cpp
     src/decoder/mf_decoder.cpp
+    src/decoder/mf_video_format.cpp
     src/platform/win32/desktop_injector.cpp
     src/platform/win32/d3d11_presenter.cpp
     src/platform/win32/power_governor.cpp
+    src/platform/win32/startup.cpp
     src/platform/win32/tray_icon.cpp
     src/app.rc
 )
@@ -35,10 +37,11 @@ target_compile_definitions(LiteWallpaperMF PRIVATE
 )
 
 target_compile_options(LiteWallpaperMF PRIVATE
-    /O1 /Oi /Gy /GL /GR- /EHsc /W4 /utf-8
+    /GR- /EHsc /W4 /utf-8
+    "$<$<CONFIG:Release>:/O1;/Oi;/Gy;/GL>"
 )
 target_link_options(LiteWallpaperMF PRIVATE
-    /LTCG /OPT:REF /OPT:ICF /INCREMENTAL:NO
+    "$<$<CONFIG:Release>:/LTCG;/OPT:REF;/OPT:ICF;/INCREMENTAL:NO>"
 )
 
 target_link_libraries(LiteWallpaperMF PRIVATE
@@ -59,3 +62,20 @@ target_link_libraries(LiteWallpaperMF PRIVATE
 set_target_properties(LiteWallpaperMF PROPERTIES
     OUTPUT_NAME "LiteWallpaper-MF"
 )
+
+include(CTest)
+if(BUILD_TESTING)
+    add_executable(LiteWallpaperTests
+        tests/regression_tests.cpp
+        src/decoder/mf_video_format.cpp
+        src/platform/win32/d3d11_presenter.cpp
+        src/platform/win32/startup.cpp
+    )
+    target_include_directories(LiteWallpaperTests PRIVATE ${CMAKE_SOURCE_DIR}/src)
+    target_compile_definitions(LiteWallpaperTests PRIVATE
+        UNICODE _UNICODE _WIN32_WINNT=0x0A00 WINVER=0x0A00 WIN32_LEAN_AND_MEAN NOMINMAX
+    )
+    target_compile_options(LiteWallpaperTests PRIVATE /W4 /EHsc /utf-8)
+    target_link_libraries(LiteWallpaperTests PRIVATE d3d11 dxgi mfplat mfuuid ole32 advapi32)
+    add_test(NAME regression COMMAND LiteWallpaperTests)
+endif()

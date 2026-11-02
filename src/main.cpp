@@ -18,6 +18,7 @@
 #include "platform/win32/d3d11_presenter.h"
 #include "platform/win32/desktop_injector.h"
 #include "platform/win32/power_governor.h"
+#include "platform/win32/startup.h"
 #include "platform/win32/tray_icon.h"
 
 #define WM_APP_ATTACH (WM_APP + 11)
@@ -43,6 +44,7 @@ bool g_suspended = false;
 bool g_decoder_open = false;
 bool g_has_presented_frame = false;
 bool g_device_lost = false;
+std::string g_failed_video_path;
 double g_playback_seconds = 0.0;
 uint64_t g_decoded_frames = 0;
 double g_decode_accumulator = 0.0;
@@ -93,29 +95,13 @@ void ShowDecoderError(const std::string& fallback) {
                 MB_OK | MB_ICONERROR);
 }
 
-bool SetRunAtStartup(bool enabled) {
-    HKEY key = nullptr;
-    constexpr wchar_t path[] = L"Software\\Microsoft\\Windows\\CurrentVersion\\Run";
-    if (RegCreateKeyExW(HKEY_CURRENT_USER, path, 0, nullptr, 0, KEY_SET_VALUE,
-                        nullptr, &key, nullptr) != ERROR_SUCCESS) {
-        return false;
+bool CheckDeviceLost() {
+    ID3D11Device* device = g_presenter.GetDevice();
+    if (device && device->GetDeviceRemovedReason() != S_OK) {
+        if (!g_device_lost) g_last_attach_attempt = 0;
+        g_device_lost = true;
     }
-
-    constexpr wchar_t name[] = L"LiteWallpaper-MF";
-    LSTATUS status = ERROR_SUCCESS;
-    if (enabled) {
-        wchar_t executable[32768] = {};
-        GetModuleFileNameW(nullptr, executable, static_cast<DWORD>(_countof(executable)));
-        std::wstring command = L"\"" + std::wstring(executable) + L"\" --startup";
-        status = RegSetValueExW(
-            key, name, 0, REG_SZ, reinterpret_cast<const BYTE*>(command.c_str()),
-            static_cast<DWORD>((command.size() + 1) * sizeof(wchar_t)));
-    } else {
-        status = RegDeleteValueW(key, name);
-        if (status == ERROR_FILE_NOT_FOUND) status = ERROR_SUCCESS;
-    }
-    RegCloseKey(key);
-    return status == ERROR_SUCCESS;
+    return g_device_lost;
 }
 
 int NativeFps() {
@@ -133,6 +119,8 @@ int EffectiveFpsCap(PowerState state) {
 
 bool OpenConfiguredVideo(double seek_seconds = 0.0, bool show_error = true) {
     if (!g_window || !g_presenter.GetDevice()) return false;
+    // A reset can occur while suspended, when neither Decode nor Present runs.
+    if (CheckDeviceLost()) return false;
 
     g_presenter.ReleaseFrameResources();
     g_frame = {};
@@ -141,6 +129,7 @@ bool OpenConfiguredVideo(double seek_seconds = 0.0, bool show_error = true) {
     g_video_info = {};
 
     const std::string& path = g_config.Get().video_path;
+    if (path == g_failed_video_path) return false;
     const std::wstring wide_path = Utf8ToWide(path);
     const DWORD attributes = GetFileAttributesW(wide_path.c_str());
     if (wide_path.empty() || attributes == INVALID_FILE_ATTRIBUTES ||
@@ -148,7 +137,13 @@ bool OpenConfiguredVideo(double seek_seconds = 0.0, bool show_error = true) {
         return false;
     }
     if (!g_decoder.Open(path.c_str(), g_presenter.GetDevice())) {
-        if (show_error) ShowDecoderError("Windows could not open this video.");
+        if (CheckDeviceLost()) return false;
+        // Device failures stay on the recovery path. Ordinary file failures
+        // must not cause a healthy graphics device to be rebuilt.
+        if (show_error) {
+            g_failed_video_path = path;
+            ShowDecoderError("Windows could not open this video.");
+        }
         return false;
     }
 
@@ -163,6 +158,7 @@ bool OpenConfiguredVideo(double seek_seconds = 0.0, bool show_error = true) {
     g_clock.Reset();
     g_decoder_open = true;
     g_suspended = false;
+    g_failed_video_path.clear();
 
     std::wstring tooltip = L"LiteWallpaper-MF - ";
     const size_t separator = wide_path.find_last_of(L"\\/");
@@ -208,13 +204,12 @@ bool RenderNextFrame(PowerState power_state) {
         ++g_decoded_frames;
     }
     if (!decoded || !g_frame.texture) {
-        ID3D11Device* device = g_presenter.GetDevice();
-        if (device && device->GetDeviceRemovedReason() != S_OK) {
-            g_device_lost = true;
-            return false;
-        }
+        if (CheckDeviceLost()) return false;
         if (!g_decoder.GetLastError().empty()) {
+            g_failed_video_path = g_config.Get().video_path;
             ShowDecoderError("Video decoding failed.");
+            g_presenter.ReleaseFrameResources();
+            g_frame = {};
             g_decoder.Close();
             g_decoder_open = false;
         }
@@ -228,12 +223,8 @@ bool RenderNextFrame(PowerState power_state) {
         g_playback_seconds = std::fmod(g_playback_seconds,
                                       g_video_info.duration_seconds);
     }
-    if (!g_presenter.RenderFrame(g_frame.texture, g_frame.texture_index,
-                                 g_config.Get().scaling_mode)) {
-        ID3D11Device* device = g_presenter.GetDevice();
-        if (device && device->GetDeviceRemovedReason() != S_OK) {
-            g_device_lost = true;
-        }
+    if (!g_presenter.RenderFrame(g_frame, g_config.Get().scaling_mode)) {
+        CheckDeviceLost();
         return false;
     }
     const HRESULT present_result = g_presenter.Present(0);
@@ -315,9 +306,9 @@ bool RebuildGraphics(bool reopen_video) {
     g_device_lost = false;
     if (reopen_video && !g_suspended &&
         !g_config.Get().video_path.empty()) {
-        const bool reopened = OpenConfiguredVideo(resume_seconds,
-                                                  !recovering_device);
-        if (recovering_device && !reopened) g_device_lost = true;
+        OpenConfiguredVideo(resume_seconds, !recovering_device);
+        // OpenConfiguredVideo checks GetDeviceRemovedReason on open failure.
+        // A missing or undecodable file alone does not mean the GPU was lost.
     }
     return !g_device_lost;
 }
@@ -348,6 +339,8 @@ void OnTrayAction(TrayAction action) {
         case TrayAction::ChooseVideo: {
             const std::wstring selected = ChooseVideoFile();
             if (!selected.empty()) {
+                g_failed_video_path.clear();
+                g_playback_seconds = 0.0;
                 config.video_path = WideToUtf8(selected);
                 g_config.Save();
                 g_manual_paused = false;
@@ -460,7 +453,12 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, LPWSTR, int) {
     }
 
     g_config.Load();
-    if (g_config.Get().run_on_startup) SetRunAtStartup(true);
+    bool startup_enabled = g_config.Get().run_on_startup;
+    if (ReconcileRunAtStartup(startup_enabled) &&
+        startup_enabled != g_config.Get().run_on_startup) {
+        g_config.Get().run_on_startup = startup_enabled;
+        g_config.Save();
+    }
     int argument_count = 0;
     LPWSTR* arguments = CommandLineToArgvW(GetCommandLineW(), &argument_count);
     if (arguments) {
@@ -535,6 +533,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, LPWSTR, int) {
         const ULONGLONG now = GetTickCount64();
         if (now - g_last_attach_attempt >= 5000) {
             g_last_attach_attempt = now;
+            CheckDeviceLost();
             if (!g_window) {
                 RebuildGraphics(false);
                 g_injector.Detach();

@@ -1,8 +1,27 @@
 # FIXTODO
 
-Review of `main` @ `98bbe4b` (2026-10-28). Work top to bottom: item 1 unblocks CI,
-items 2–4 are user-visible bugs, the rest is cleanup. Each item lists **where**,
-**change** and **done when**. Line numbers refer to `98bbe4b`.
+Historical review of `main` @ `98bbe4b` (2026-10-28). The numbered descriptions
+below retain the original proposals and line numbers; use the status table to
+distinguish implemented fixes from remaining work. Runtime acceptance is separate
+from source implementation.
+
+## Status (2026-11-02)
+
+| Item | Status |
+|---|---|
+| 1. Build includes | Landed on main. Candidate Debug/Release builds and regression tests pass CI run 41420857926; Release size 583168 bytes. |
+| 2. Unicode INI | Landed on main; hardware/manual acceptance remains pending. |
+| 3. Explorer restart | Landed on main; hardware/manual acceptance remains pending. |
+| 4. Device recovery | Landed on main; this candidate also detects loss during suspend and failed decoder open. GPU-reset validation pending. |
+| 5. Repeated error dialogs | Candidate remembers failed paths; deliberate Choose video clears the failure. Manual verification pending. |
+| 6. Tray double-click | Still open. |
+| 7. Deleted autostart entry | Candidate reconciles the saved flag with the Run value; process-isolated registry tests pass in Debug and Release. |
+| 8. Build flags and warnings | Candidate limits optimization flags to Release; Debug/Release builds pass. Ten decoder enum-conversion warnings per configuration remain open. |
+| 9. Upstream docs/names | Still open; benchmark results remain Pending. |
+| 10. Hardware verification | Still open. |
+
+This candidate also addresses the review's visible-aperture and full-range/matrix
+findings. See `docs/P2-VALIDATION.md` for CI evidence and pending hardware checks.
 
 Delete this file once every item is done.
 

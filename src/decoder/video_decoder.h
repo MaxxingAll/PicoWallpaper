@@ -7,17 +7,29 @@ struct ID3D11Device;
 
 namespace miniwp {
 
-struct VideoFrame {
+enum class VideoRange { Unknown, Limited, Full };
+enum class VideoMatrix { Unknown, BT601, BT709, BT2020 };
+
+struct VideoFormat {
+    int width = 0;
+    int height = 0;
+    int display_left = 0;
+    int display_top = 0;
+    int display_width = 0;
+    int display_height = 0;
+    uint32_t pixel_aspect_numerator = 1;
+    uint32_t pixel_aspect_denominator = 1;
+    VideoRange range = VideoRange::Unknown;
+    VideoMatrix matrix = VideoMatrix::Unknown;
+};
+
+struct VideoFrame : VideoFormat {
     ID3D11Texture2D* texture = nullptr;  // GPU texture (normally NV12)
     int texture_index = 0;               // Array slice index inside texture array
     int64_t pts = 0;                     // Presentation timestamp (microseconds)
-    int width = 0;
-    int height = 0;
 };
 
-struct VideoInfo {
-    int width = 0;
-    int height = 0;
+struct VideoInfo : VideoFormat {
     double fps = 0.0;
     double duration_seconds = 0.0;
     std::string codec_name;

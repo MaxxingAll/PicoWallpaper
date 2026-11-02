@@ -6,6 +6,106 @@
 
 namespace miniwp {
 
+bool CalculateVideoRectangles(const VideoFormat& format, UINT texture_width,
+                              UINT texture_height, int output_width, int output_height,
+                              int scaling_mode, RECT& source, RECT& destination) {
+    const int width = format.display_width > 0 ? format.display_width : format.width;
+    const int height = format.display_height > 0 ? format.display_height : format.height;
+    if (format.width <= 0 || format.height <= 0 || width <= 0 || height <= 0 ||
+        output_width <= 0 || output_height <= 0 ||
+        format.display_left < 0 || format.display_top < 0 ||
+        static_cast<uint64_t>(format.width) > texture_width ||
+        static_cast<uint64_t>(format.height) > texture_height ||
+        static_cast<int64_t>(format.display_left) + width > format.width ||
+        static_cast<int64_t>(format.display_top) + height > format.height) {
+        return false;
+    }
+    source = {format.display_left, format.display_top,
+              format.display_left + width, format.display_top + height};
+    destination = {0, 0, output_width, output_height};
+    const double pixel_aspect = format.pixel_aspect_numerator && format.pixel_aspect_denominator
+        ? static_cast<double>(format.pixel_aspect_numerator) / format.pixel_aspect_denominator
+        : 1.0;
+    const double video_aspect = width * pixel_aspect / height;
+    const double output_aspect = static_cast<double>(output_width) / output_height;
+    if (scaling_mode == 0) {
+        if (output_aspect > video_aspect) {
+            const LONG cropped = std::clamp(static_cast<LONG>(width * pixel_aspect / output_aspect),
+                                             1L, static_cast<LONG>(height));
+            source.top += (height - cropped) / 2;
+            source.bottom = source.top + cropped;
+        } else {
+            const LONG cropped = std::clamp(static_cast<LONG>(height * output_aspect / pixel_aspect),
+                                             1L, static_cast<LONG>(width));
+            source.left += (width - cropped) / 2;
+            source.right = source.left + cropped;
+        }
+    } else if (scaling_mode == 1) {
+        if (output_aspect > video_aspect) {
+            const LONG fitted = std::clamp(static_cast<LONG>(output_height * video_aspect),
+                                            1L, static_cast<LONG>(output_width));
+            destination.left = (output_width - fitted) / 2;
+            destination.right = destination.left + fitted;
+        } else {
+            const LONG fitted = std::clamp(static_cast<LONG>(output_width / video_aspect),
+                                            1L, static_cast<LONG>(output_height));
+            destination.top = (output_height - fitted) / 2;
+            destination.bottom = destination.top + fitted;
+        }
+    }
+    return true;
+}
+
+DXGI_COLOR_SPACE_TYPE VideoInputColorSpace(const VideoFormat& format, DXGI_FORMAT texture_format) {
+    const bool yuv = texture_format == DXGI_FORMAT_NV12 ||
+                     texture_format == DXGI_FORMAT_P010 || texture_format == DXGI_FORMAT_P016;
+    if (!yuv) {
+        return format.range == VideoRange::Limited ? DXGI_COLOR_SPACE_RGB_STUDIO_G22_NONE_P709
+                                                   : DXGI_COLOR_SPACE_RGB_FULL_G22_NONE_P709;
+    }
+    const bool full = format.range == VideoRange::Full;
+    VideoMatrix matrix = format.matrix;
+    // Only untagged streams use the historical SD/HD heuristic.
+    if (matrix == VideoMatrix::Unknown) {
+        matrix = format.height >= 720 ? VideoMatrix::BT709 : VideoMatrix::BT601;
+    }
+    if (matrix == VideoMatrix::BT2020) {
+        return full ? DXGI_COLOR_SPACE_YCBCR_FULL_G22_LEFT_P2020
+                    : DXGI_COLOR_SPACE_YCBCR_STUDIO_G22_LEFT_P2020;
+    }
+    if (matrix == VideoMatrix::BT601) {
+        return full ? DXGI_COLOR_SPACE_YCBCR_FULL_G22_LEFT_P601
+                    : DXGI_COLOR_SPACE_YCBCR_STUDIO_G22_LEFT_P601;
+    }
+    return full ? DXGI_COLOR_SPACE_YCBCR_FULL_G22_LEFT_P709
+                : DXGI_COLOR_SPACE_YCBCR_STUDIO_G22_LEFT_P709;
+}
+
+bool SelectSupportedVideoColorSpace(ID3D11VideoProcessorEnumerator1* enumerator,
+                                    DXGI_FORMAT input_format,
+                                    DXGI_COLOR_SPACE_TYPE requested,
+                                    DXGI_COLOR_SPACE_TYPE& selected) {
+    if (!enumerator) return false;
+    const bool yuv = input_format == DXGI_FORMAT_NV12 ||
+                     input_format == DXGI_FORMAT_P010 || input_format == DXGI_FORMAT_P016;
+    const DXGI_COLOR_SPACE_TYPE fallback = yuv
+        ? DXGI_COLOR_SPACE_YCBCR_STUDIO_G22_LEFT_P709
+        : DXGI_COLOR_SPACE_RGB_FULL_G22_NONE_P709;
+    const DXGI_COLOR_SPACE_TYPE candidates[] = {requested, fallback};
+    for (int i = 0; i < 2; ++i) {
+        if (i == 1 && requested == fallback) break;
+        BOOL supported = FALSE;
+        const HRESULT hr = enumerator->CheckVideoProcessorFormatConversion(
+            input_format, candidates[i], DXGI_FORMAT_B8G8R8A8_UNORM,
+            DXGI_COLOR_SPACE_RGB_FULL_G22_NONE_P709, &supported);
+        if (SUCCEEDED(hr) && supported) {
+            selected = candidates[i];
+            return true;
+        }
+    }
+    return false;
+}
+
 D3D11Presenter::~D3D11Presenter() {
     Cleanup();
 }
@@ -39,7 +139,8 @@ bool D3D11Presenter::Init(HWND window, int width, int height) {
         multithread->SetMultithreadProtected(TRUE);
     }
     if (FAILED(m_device.As(&m_video_device)) ||
-        FAILED(m_context.As(&m_video_context))) {
+        FAILED(m_context.As(&m_video_context)) ||
+        FAILED(m_video_context.As(&m_video_context1))) {
         return false;
     }
     return CreateSwapChain();
@@ -84,7 +185,9 @@ bool D3D11Presenter::CreateVideoProcessor(UINT input_width, UINT input_height) {
     ReleaseFrameResources();
     m_output_view.Reset();
     m_processor.Reset();
+    m_enumerator1.Reset();
     m_enumerator.Reset();
+    m_color_input_format = DXGI_FORMAT_UNKNOWN;
 
     D3D11_VIDEO_PROCESSOR_CONTENT_DESC content = {};
     content.InputFrameFormat = D3D11_VIDEO_FRAME_FORMAT_PROGRESSIVE;
@@ -98,7 +201,8 @@ bool D3D11Presenter::CreateVideoProcessor(UINT input_width, UINT input_height) {
     if (FAILED(m_video_device->CreateVideoProcessorEnumerator(
             &content, &m_enumerator)) ||
         FAILED(m_video_device->CreateVideoProcessor(m_enumerator.Get(), 0,
-                                                     &m_processor))) {
+                                                     &m_processor)) ||
+        FAILED(m_enumerator.As(&m_enumerator1))) {
         return false;
     }
 
@@ -120,8 +224,9 @@ bool D3D11Presenter::CreateVideoProcessor(UINT input_width, UINT input_height) {
     return true;
 }
 
-bool D3D11Presenter::RenderFrame(ID3D11Texture2D* texture, int array_index,
-                                 int scaling_mode) {
+bool D3D11Presenter::RenderFrame(const VideoFrame& frame, int scaling_mode) {
+    ID3D11Texture2D* texture = frame.texture;
+    const int array_index = frame.texture_index;
     if (!texture || !m_video_context || !m_swap_chain) return false;
 
     D3D11_TEXTURE2D_DESC texture_description = {};
@@ -159,37 +264,19 @@ bool D3D11Presenter::RenderFrame(ID3D11Texture2D* texture, int array_index,
         }
     }
 
-    RECT source = {0, 0, static_cast<LONG>(texture_description.Width),
-                   static_cast<LONG>(texture_description.Height)};
-    RECT destination = {0, 0, m_width, m_height};
-    const double video_aspect = static_cast<double>(texture_description.Width) /
-                                texture_description.Height;
-    const double output_aspect = static_cast<double>(m_width) / m_height;
+    RECT source = {}, destination = {};
+    if (!CalculateVideoRectangles(frame, texture_description.Width, texture_description.Height,
+                                   m_width, m_height, scaling_mode, source, destination)) {
+        return false;
+    }
 
-    if (scaling_mode == 0) {
-        if (output_aspect > video_aspect) {
-            const LONG height = (std::max)(
-                1L, static_cast<LONG>(texture_description.Width / output_aspect));
-            source.top = (static_cast<LONG>(texture_description.Height) - height) / 2;
-            source.bottom = source.top + height;
-        } else {
-            const LONG width = (std::max)(
-                1L, static_cast<LONG>(texture_description.Height * output_aspect));
-            source.left = (static_cast<LONG>(texture_description.Width) - width) / 2;
-            source.right = source.left + width;
-        }
-    } else if (scaling_mode == 1) {
-        if (output_aspect > video_aspect) {
-            const LONG width = (std::max)(
-                1L, static_cast<LONG>(m_height * video_aspect));
-            destination.left = (m_width - width) / 2;
-            destination.right = destination.left + width;
-        } else {
-            const LONG height = (std::max)(
-                1L, static_cast<LONG>(m_width / video_aspect));
-            destination.top = (m_height - height) / 2;
-            destination.bottom = destination.top + height;
-        }
+    const DXGI_COLOR_SPACE_TYPE requested = VideoInputColorSpace(frame, texture_description.Format);
+    if (m_color_input_format != texture_description.Format ||
+        m_requested_color_space != requested) {
+        if (!SelectSupportedVideoColorSpace(m_enumerator1.Get(), texture_description.Format,
+                                            requested, m_input_color_space)) return false;
+        m_color_input_format = texture_description.Format;
+        m_requested_color_space = requested;
     }
 
     D3D11_VIDEO_COLOR background = {};
@@ -201,22 +288,10 @@ bool D3D11Presenter::RenderFrame(ID3D11Texture2D* texture, int array_index,
         m_processor.Get(), TRUE, &output_rect);
     m_video_context->VideoProcessorSetStreamFrameFormat(
         m_processor.Get(), 0, D3D11_VIDEO_FRAME_FORMAT_PROGRESSIVE);
-    D3D11_VIDEO_PROCESSOR_COLOR_SPACE input_color = {};
-    const bool ycbcr_input = texture_description.Format == DXGI_FORMAT_NV12 ||
-                             texture_description.Format == DXGI_FORMAT_P010 ||
-                             texture_description.Format == DXGI_FORMAT_P016;
-    if (ycbcr_input) {
-        input_color.YCbCr_Matrix = texture_description.Height >= 720 ? 1 : 0;
-        input_color.Nominal_Range = 1; // studio range (16-235)
-    } else {
-        input_color.Nominal_Range = 2; // full range RGB
-    }
-    D3D11_VIDEO_PROCESSOR_COLOR_SPACE output_color = {};
-    output_color.Nominal_Range = 2; // full range RGB
-    m_video_context->VideoProcessorSetStreamColorSpace(
-        m_processor.Get(), 0, &input_color);
-    m_video_context->VideoProcessorSetOutputColorSpace(
-        m_processor.Get(), &output_color);
+    m_video_context1->VideoProcessorSetStreamColorSpace1(
+        m_processor.Get(), 0, m_input_color_space);
+    m_video_context1->VideoProcessorSetOutputColorSpace1(
+        m_processor.Get(), DXGI_COLOR_SPACE_RGB_FULL_G22_NONE_P709);
     m_video_context->VideoProcessorSetStreamAutoProcessingMode(
         m_processor.Get(), 0, FALSE);
     m_video_context->VideoProcessorSetStreamSourceRect(
@@ -241,6 +316,7 @@ bool D3D11Presenter::Resize(int width, int height) {
     if (!m_swap_chain || (width == m_width && height == m_height)) return false;
     ReleaseFrameResources();
     m_output_view.Reset();
+    m_enumerator1.Reset();
     m_enumerator.Reset();
     m_processor.Reset();
     m_input_width = 0;
@@ -267,7 +343,9 @@ void D3D11Presenter::Cleanup() {
     m_output_view.Reset();
     ReleaseFrameResources();
     m_processor.Reset();
+    m_enumerator1.Reset();
     m_enumerator.Reset();
+    m_video_context1.Reset();
     m_video_context.Reset();
     m_video_device.Reset();
     m_swap_chain.Reset();
@@ -278,6 +356,9 @@ void D3D11Presenter::Cleanup() {
     m_height = 0;
     m_input_width = 0;
     m_input_height = 0;
+    m_color_input_format = DXGI_FORMAT_UNKNOWN;
+    m_requested_color_space = DXGI_COLOR_SPACE_CUSTOM;
+    m_input_color_space = DXGI_COLOR_SPACE_CUSTOM;
 }
 
 } // namespace miniwp

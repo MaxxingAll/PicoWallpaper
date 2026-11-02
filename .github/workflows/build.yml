@@ -10,15 +10,22 @@ permissions:
 jobs:
   windows:
     runs-on: windows-latest
+    strategy:
+      matrix:
+        configuration: [Debug, Release]
     steps:
       - uses: actions/checkout@v4
       - uses: microsoft/setup-msbuild@v2
       - name: Configure
         run: cmake -B build -S . -A x64
       - name: Build
-        run: cmake --build build --config Release
+        run: cmake --build build --config ${{ matrix.configuration }}
+      - name: Regression tests
+        run: ctest --test-dir build -C ${{ matrix.configuration }} --output-on-failure
       - name: Enforce executable size budget
+        if: matrix.configuration == 'Release'
         shell: pwsh
         run: |
           $size = (Get-Item "build/Release/LiteWallpaper-MF.exe").Length
+          Write-Output "Release executable: $size bytes"
           if ($size -gt 1572864) { throw "Executable exceeds the 1.5 MB size budget: $size bytes" }
