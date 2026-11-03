@@ -297,8 +297,8 @@ afterwards so CI keeps it that way.
 After items 1–4, on real hardware, record each result in `docs/BENCHMARK.md`:
 
 - [ ] 1080p30 VP9 WebM and H.264 MP4 loop with no visible hitch at the loop point
-- [ ] Task Manager → GPU → **Video Decode** > 0 % for `LiteWallpaper-MF.exe`
-- [ ] `dumpbin /imports LiteWallpaper-MF.exe` lists only Windows system DLLs (no `VCRUNTIME*`, `MSVCP*`, `d3dcompiler_47`)
+- [ ] Task Manager → GPU → **Video Decode** > 0 % for `PicoWallpaper.exe`
+- [ ] `dumpbin /imports PicoWallpaper.exe` lists only Windows system DLLs (no `VCRUNTIME*`, `MSVCP*`, `d3dcompiler_47`)
 - [ ] exe ≤ 1.5 MB
 - [ ] pause/resume on fullscreen, maximized, battery, lock, and sleep
 - [ ] the Explorer-restart and monitor-change tests from item 3

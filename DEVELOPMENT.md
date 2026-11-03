@@ -1,4 +1,4 @@
-# Development
+# PicoWallpaper Development
 
 ## Architecture
 
@@ -54,6 +54,10 @@ and fractional apertures, aperture precedence, non-square pixels, full/studio
 range and tagged matrices. Startup tests redirect HKCU inside the test process
 to a temporary test key, which is removed afterward; they never change the real
 Run entry. Checks remain active in Release builds.
+
+Config migration tests use temporary folders and verify copying without overwriting
+an existing configuration. Isolated registry tests cover migration of enabled and
+disabled autostart settings, alongside the existing reconciliation checks.
 
 A COM enumerator stub also tests supported, unsupported and failed driver
 conversion queries, including RGB/YUV fallback and an unsupported baseline.

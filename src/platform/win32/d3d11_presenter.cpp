@@ -4,7 +4,7 @@
 
 #include <algorithm>
 
-namespace miniwp {
+namespace picowp {
 
 bool CalculateVideoRectangles(const VideoFormat& format, UINT texture_width,
                               UINT texture_height, int output_width, int output_height,
@@ -361,4 +361,4 @@ void D3D11Presenter::Cleanup() {
     m_input_color_space = DXGI_COLOR_SPACE_CUSTOM;
 }
 
-} // namespace miniwp
+} // namespace picowp

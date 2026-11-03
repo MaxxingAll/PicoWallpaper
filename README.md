@@ -1,6 +1,6 @@
-# LiteWallpaper-MF
+# PicoWallpaper
 
-LiteWallpaper-MF is a small, native video-wallpaper player for Windows 10 and
+PicoWallpaper is a small, native video-wallpaper player for Windows 10 and
 Windows 11. It uses Windows Media Foundation for decoding and Direct3D 11 for
 presentation, so releases contain one executable and no bundled FFmpeg or codec
 DLLs.
@@ -20,11 +20,13 @@ This project is a GPL-3.0 fork of `f4rdani/LiteWallpaper`.
 
 ## Usage
 
-1. Run `LiteWallpaper-MF.exe`.
+1. Run `PicoWallpaper.exe`.
 2. Open its tray icon and choose **Choose video...**.
 3. Use the same menu to pause, select an FPS cap, configure pause behavior, or exit.
 
-Settings are stored in `%APPDATA%\LiteWallpaper-MF\config.ini`.
+Settings are stored in `%APPDATA%\PicoWallpaper\config.ini`. On first launch,
+settings from the previous version are copied if no new configuration exists; the
+old configuration remains intact. Its autostart entry is migrated to `PicoWallpaper`.
 
 Supported formats are the formats installed Windows can decode. H.264 MP4 is
 built into standard Windows editions. VP9, AV1, HEVC, WebM, or MKV playback can
@@ -49,13 +51,13 @@ cmake -B build -S . -A x64
 cmake --build build --config Release
 ```
 
-The result is `build/Release/LiteWallpaper-MF.exe`. The release build uses the
+The result is `build/Release/PicoWallpaper.exe`. The release build uses the
 static C runtime and imports only Windows system libraries.
 
 ## Uninstall
 
 Exit the tray application and delete the executable. If autostart was enabled,
-turn it off from the tray first or remove the `LiteWallpaper-MF` value under
+turn it off from the tray first or remove the `PicoWallpaper` value under
 `HKCU\Software\Microsoft\Windows\CurrentVersion\Run`. The optional configuration
 directory can then be deleted.
 

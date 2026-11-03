@@ -15,7 +15,7 @@
 #include <cmath>
 #include <cwctype>
 
-namespace miniwp {
+namespace picowp {
 namespace {
 
 constexpr DWORD FourCC(char a, char b, char c, char d) {
@@ -77,7 +77,7 @@ const char* CodecInstallHint(const std::wstring& path, const std::string& codec)
 }
 
 void DebugLog(const std::string& message) {
-    OutputDebugStringA("LiteWallpaper-MF: ");
+    OutputDebugStringA("PicoWallpaper: ");
     OutputDebugStringA(message.c_str());
     OutputDebugStringA("\n");
 }
@@ -411,4 +411,4 @@ void MFDecoder::Close() {
     m_path.clear();
 }
 
-} // namespace miniwp
+} // namespace picowp

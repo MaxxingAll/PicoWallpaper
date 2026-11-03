@@ -2,7 +2,7 @@
 
 #define WM_APP_ATTACH (WM_APP + 11)
 
-namespace miniwp {
+namespace picowp {
 
 static UINT g_taskbar_created_msg = 0;
 
@@ -190,13 +190,13 @@ void DesktopInjector::RegisterExplorerRestart(HWND targetHwnd) {
         wc.cbSize = sizeof(wc);
         wc.lpfnWndProc = MsgReceiverWndProc;
         wc.hInstance = GetModuleHandleW(nullptr);
-        wc.lpszClassName = L"MiniWallpaper_MsgReceiver";
+        wc.lpszClassName = L"PicoWallpaper_MsgReceiver";
         RegisterClassExW(&wc);
 
         // Top-level hidden window placed far off-screen with layered transparent style (0 visual artifacts)
         m_msg_receiver = CreateWindowExW(
             WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE | WS_EX_TRANSPARENT | WS_EX_LAYERED,
-            L"MiniWallpaper_MsgReceiver",
+            L"PicoWallpaper_MsgReceiver",
             L"",
             WS_POPUP,
             -32000, -32000, 0, 0,
@@ -215,4 +215,4 @@ UINT DesktopInjector::GetTaskbarRestartMsg() const {
     return m_taskbar_restart_msg;
 }
 
-} // namespace miniwp
+} // namespace picowp

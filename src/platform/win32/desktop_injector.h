@@ -1,7 +1,7 @@
 #pragma once
 #include <windows.h>
 
-namespace miniwp {
+namespace picowp {
 
 class DesktopInjector {
 public:
@@ -46,4 +46,4 @@ private:
     static LRESULT CALLBACK MsgReceiverWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam);
 };
 
-} // namespace miniwp
+} // namespace picowp

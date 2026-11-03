@@ -1,7 +1,7 @@
-# Benchmark Method
+# PicoWallpaper Benchmark Method
 
 This document defines the repeatable benchmark used to compare upstream v2.0.0
-with the Media Foundation fork. Run both builds on the same Windows machine,
+with PicoWallpaper. Run both builds on the same Windows machine,
 with the same video, display configuration, power plan, and background workload.
 
 ## Reference workload
@@ -67,7 +67,7 @@ cmake --build build --config Release
 
 ## Baseline results
 
-| Metric | Upstream v2.0.0, 30 fps | Media Foundation, 30 fps | Media Foundation, 60 fps | Target |
+| Metric | Upstream v2.0.0, 30 fps | PicoWallpaper, 30 fps | PicoWallpaper, 60 fps | Target |
 |---|---:|---:|---:|---:|
 | Executable size | Pending (owner) | Pending (owner) | Pending (owner) | <= 1.5 MB |
 | Release size, uncompressed | Pending (owner) | Pending (owner) | Pending (owner) | <= 1.5 MB |

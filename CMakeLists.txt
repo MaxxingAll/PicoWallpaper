@@ -1,18 +1,18 @@
 cmake_minimum_required(VERSION 3.20)
-project(LiteWallpaperMF VERSION 0.1.0 LANGUAGES CXX RC)
+project(PicoWallpaper VERSION 0.1.0 LANGUAGES CXX RC)
 
 if(NOT WIN32)
-    message(FATAL_ERROR "LiteWallpaper-MF builds on Windows 10/11 only")
+    message(FATAL_ERROR "PicoWallpaper builds on Windows 10/11 only")
 endif()
 if(NOT MSVC)
-    message(FATAL_ERROR "LiteWallpaper-MF requires the Visual Studio C++ toolchain")
+    message(FATAL_ERROR "PicoWallpaper requires the Visual Studio C++ toolchain")
 endif()
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
 
-add_executable(LiteWallpaperMF WIN32
+add_executable(PicoWallpaper WIN32
     src/main.cpp
     src/core/config.cpp
     src/core/playback_clock.cpp
@@ -26,8 +26,8 @@ add_executable(LiteWallpaperMF WIN32
     src/app.rc
 )
 
-target_include_directories(LiteWallpaperMF PRIVATE ${CMAKE_SOURCE_DIR}/src)
-target_compile_definitions(LiteWallpaperMF PRIVATE
+target_include_directories(PicoWallpaper PRIVATE ${CMAKE_SOURCE_DIR}/src)
+target_compile_definitions(PicoWallpaper PRIVATE
     UNICODE
     _UNICODE
     _WIN32_WINNT=0x0A00
@@ -36,15 +36,15 @@ target_compile_definitions(LiteWallpaperMF PRIVATE
     NOMINMAX
 )
 
-target_compile_options(LiteWallpaperMF PRIVATE
+target_compile_options(PicoWallpaper PRIVATE
     /GR- /EHsc /W4 /utf-8
     "$<$<CONFIG:Release>:/O1;/Oi;/Gy;/GL>"
 )
-target_link_options(LiteWallpaperMF PRIVATE
-    "$<$<CONFIG:Release>:/LTCG;/OPT:REF;/OPT:ICF;/INCREMENTAL:NO;/MAP:$<TARGET_FILE_DIR:LiteWallpaperMF>/LiteWallpaper-MF.map>"
+target_link_options(PicoWallpaper PRIVATE
+    "$<$<CONFIG:Release>:/LTCG;/OPT:REF;/OPT:ICF;/INCREMENTAL:NO;/MAP:$<TARGET_FILE_DIR:PicoWallpaper>/PicoWallpaper.map>"
 )
 
-target_link_libraries(LiteWallpaperMF PRIVATE
+target_link_libraries(PicoWallpaper PRIVATE
     d3d11
     dxgi
     mfplat
@@ -59,23 +59,24 @@ target_link_libraries(LiteWallpaperMF PRIVATE
     advapi32
 )
 
-set_target_properties(LiteWallpaperMF PROPERTIES
-    OUTPUT_NAME "LiteWallpaper-MF"
+set_target_properties(PicoWallpaper PROPERTIES
+    OUTPUT_NAME "PicoWallpaper"
 )
 
 include(CTest)
 if(BUILD_TESTING)
-    add_executable(LiteWallpaperTests
+    add_executable(PicoWallpaperTests
         tests/regression_tests.cpp
+        src/core/config.cpp
         src/decoder/mf_video_format.cpp
         src/platform/win32/d3d11_presenter.cpp
         src/platform/win32/startup.cpp
     )
-    target_include_directories(LiteWallpaperTests PRIVATE ${CMAKE_SOURCE_DIR}/src)
-    target_compile_definitions(LiteWallpaperTests PRIVATE
+    target_include_directories(PicoWallpaperTests PRIVATE ${CMAKE_SOURCE_DIR}/src)
+    target_compile_definitions(PicoWallpaperTests PRIVATE
         UNICODE _UNICODE _WIN32_WINNT=0x0A00 WINVER=0x0A00 WIN32_LEAN_AND_MEAN NOMINMAX
     )
-    target_compile_options(LiteWallpaperTests PRIVATE /W4 /EHsc /utf-8)
-    target_link_libraries(LiteWallpaperTests PRIVATE d3d11 dxgi mfplat mfuuid ole32 advapi32)
-    add_test(NAME regression COMMAND LiteWallpaperTests)
+    target_compile_options(PicoWallpaperTests PRIVATE /W4 /EHsc /utf-8)
+    target_link_libraries(PicoWallpaperTests PRIVATE d3d11 dxgi mfplat mfuuid ole32 advapi32 shell32)
+    add_test(NAME regression COMMAND PicoWallpaperTests)
 endif()

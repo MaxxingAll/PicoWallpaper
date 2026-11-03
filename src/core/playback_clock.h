@@ -1,7 +1,7 @@
 #pragma once
 #include <cstdint>
 
-namespace miniwp {
+namespace picowp {
 
 // Clock that paces playback at the VIDEO's native frame rate (so playback is
 // always real-time / 1x speed), while the target display FPS is handled as a
@@ -36,4 +36,4 @@ private:
     int64_t m_last_frame_time = 0;       // timestamp in microseconds
 };
 
-} // namespace miniwp
+} // namespace picowp

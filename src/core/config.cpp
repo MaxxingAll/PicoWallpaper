@@ -6,7 +6,7 @@
 
 #include <algorithm>
 
-namespace miniwp {
+namespace picowp {
 namespace {
 
 std::wstring Utf8ToWide(const std::string& value) {
@@ -86,13 +86,26 @@ bool EnsureUnicodeIni(const std::wstring& path) {
 
 Config g_config;
 
+bool MigrateLegacyConfig(const std::wstring& legacy_dir, const std::wstring& new_dir) {
+    const std::wstring source = legacy_dir + L"\\config.ini";
+    const std::wstring destination = new_dir + L"\\config.ini";
+    if (GetFileAttributesW(destination.c_str()) != INVALID_FILE_ATTRIBUTES) return true;
+    if (GetFileAttributesW(source.c_str()) == INVALID_FILE_ATTRIBUTES) {
+        const DWORD error = GetLastError();
+        return error == ERROR_FILE_NOT_FOUND || error == ERROR_PATH_NOT_FOUND;
+    }
+    if (!EnsureDirectory(new_dir)) return false;
+    if (CopyFileW(source.c_str(), destination.c_str(), TRUE)) return true;
+    return GetLastError() == ERROR_FILE_EXISTS;
+}
+
 std::wstring Config::GetConfigDir() {
     wchar_t app_data[MAX_PATH] = {};
     if (FAILED(SHGetFolderPathW(nullptr, CSIDL_APPDATA, nullptr,
                                 SHGFP_TYPE_CURRENT, app_data))) {
         return L".";
     }
-    return std::wstring(app_data) + L"\\LiteWallpaper-MF";
+    return std::wstring(app_data) + L"\\PicoWallpaper";
 }
 
 std::wstring Config::GetConfigFilePath() {
@@ -101,6 +114,12 @@ std::wstring Config::GetConfigFilePath() {
 
 bool Config::Load() {
     const std::wstring dir = GetConfigDir();
+    wchar_t app_data[MAX_PATH] = {};
+    if (FAILED(SHGetFolderPathW(nullptr, CSIDL_APPDATA, nullptr,
+                                SHGFP_TYPE_CURRENT, app_data))) return false;
+    constexpr wchar_t kLegacyConfigFolder[] = L"LiteWallpaper-MF";
+    const bool migrated = MigrateLegacyConfig(
+        std::wstring(app_data) + L"\\" + kLegacyConfigFolder, dir);
     const bool directory_ready = EnsureDirectory(dir);
 
     const std::wstring path = GetConfigFilePath();
@@ -118,7 +137,7 @@ bool Config::Load() {
     m_config.pause_on_maximized = ReadBool(L"pause_maximized", true, path);
     m_config.pause_on_battery = ReadBool(L"pause_battery", false, path);
     m_config.run_on_startup = ReadBool(L"run_on_startup", false, path);
-    return directory_ready;
+    return migrated && directory_ready;
 }
 
 bool Config::Save() const {
@@ -143,4 +162,4 @@ bool Config::Save() const {
     return ok;
 }
 
-} // namespace miniwp
+} // namespace picowp

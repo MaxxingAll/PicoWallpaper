@@ -5,7 +5,7 @@
 
 #define WM_APP_TRAYICON (WM_APP + 1)
 
-namespace miniwp {
+namespace picowp {
 
 enum class TrayAction {
     ChooseVideo,
@@ -50,4 +50,4 @@ private:
     bool m_startup = false;
 };
 
-} // namespace miniwp
+} // namespace picowp
