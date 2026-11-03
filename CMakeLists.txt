@@ -41,7 +41,7 @@ target_compile_options(LiteWallpaperMF PRIVATE
     "$<$<CONFIG:Release>:/O1;/Oi;/Gy;/GL>"
 )
 target_link_options(LiteWallpaperMF PRIVATE
-    "$<$<CONFIG:Release>:/LTCG;/OPT:REF;/OPT:ICF;/INCREMENTAL:NO>"
+    "$<$<CONFIG:Release>:/LTCG;/OPT:REF;/OPT:ICF;/INCREMENTAL:NO;/MAP:$<TARGET_FILE_DIR:LiteWallpaperMF>/LiteWallpaper-MF.map>"
 )
 
 target_link_libraries(LiteWallpaperMF PRIVATE

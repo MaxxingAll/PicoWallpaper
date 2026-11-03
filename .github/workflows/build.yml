@@ -29,3 +29,23 @@ jobs:
           $size = (Get-Item "build/Release/LiteWallpaper-MF.exe").Length
           Write-Output "Release executable: $size bytes"
           if ($size -gt 1572864) { throw "Executable exceeds the 1.5 MB size budget: $size bytes" }
+      - name: Report executable sections and imported DLLs
+        if: matrix.configuration == 'Release'
+        shell: pwsh
+        run: |
+          $vswhere = "${env:ProgramFiles(x86)}/Microsoft Visual Studio/Installer/vswhere.exe"
+          $dumpbin = & $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -find 'VC\Tools\MSVC\*\bin\Hostx64\x64\dumpbin.exe' | Select-Object -First 1
+          if (!$dumpbin) { throw 'Could not locate x64 dumpbin with vswhere' }
+          $exe = 'build/Release/LiteWallpaper-MF.exe'
+          & $dumpbin /headers $exe
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          & $dumpbin /imports $exe | Select-String '^\s+\S+\.dll\s*$' | ForEach-Object { $_.Line.Trim() }
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+      - name: Upload Release linker map
+        if: matrix.configuration == 'Release'
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-linker-map
+          path: build/Release/LiteWallpaper-MF.map
+          if-no-files-found: error
+          retention-days: 7

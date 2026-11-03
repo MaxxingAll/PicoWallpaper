@@ -246,8 +246,8 @@ Rust rewrite, per-monitor video, playlists, audio, HDR, FIXTODO 6 (tray double-c
 | Task | Branch / PR | CI run | Result (bytes, tests) | Owner measurement |
 |---|---|---|---|---|
 | R1 | | | | Pending (owner) |
-| P0.1 | | | | — |
-| P0.2 | | | | — |
+| P0.1 | `perf/p0-measure` / #1 | [41426394525](https://github.com/MaxxingAll/PicoWallpaper/actions/runs/41426394525) | 583,168 → 583,168 bytes. Debug/Release CTest passed. Section sizes and imports logged; map downloaded (374,136 bytes). | — |
+| P0.2 | `perf/p0-measure` / #1 | [41426508723](https://github.com/MaxxingAll/PicoWallpaper/actions/runs/41426508723) | 583,168 → 583,168 bytes. Debug/Release CTest passed. | — |
 | P0.3 | — | — | — | Pending (owner) |
 | P1.1 | | | | Pending (owner) |
 | P1.2 | | | | Pending (owner) |
