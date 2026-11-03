@@ -1,3 +1,4 @@
+#include "core/config.h"
 #include "core/number_format.h"
 #include "decoder/mf_video_format.h"
 #include "platform/win32/d3d11_presenter.h"
@@ -12,7 +13,7 @@
 #include <stdexcept>
 #include <string>
 
-using namespace miniwp;
+using namespace picowp;
 using Microsoft::WRL::ComPtr;
 
 namespace {
@@ -297,13 +298,14 @@ void DriverColorSupport() {
 }
 
 constexpr wchar_t kRunKey[] = L"Software\\Microsoft\\Windows\\CurrentVersion\\Run";
-constexpr wchar_t kValue[] = L"LiteWallpaper-MF";
+constexpr wchar_t kValue[] = L"PicoWallpaper";
+constexpr wchar_t kLegacyValue[] = L"LiteWallpaper-MF";
 
 // Redirect HKCU only inside this test process, so no real startup value is touched.
 class IsolatedRegistry {
 public:
     IsolatedRegistry() {
-        m_path = L"Software\\LiteWallpaperMF-Tests-" + std::to_wstring(GetCurrentProcessId()) +
+        m_path = L"Software\\PicoWallpaper-Tests-" + std::to_wstring(GetCurrentProcessId()) +
                  L"-" + std::to_wstring(GetTickCount64());
         Check(RegCreateKeyExW(HKEY_CURRENT_USER, m_path.c_str(), 0, nullptr,
                               REG_OPTION_NON_VOLATILE, KEY_ALL_ACCESS, nullptr, &m_root,
@@ -335,6 +337,71 @@ std::wstring ReadStartup() {
     return value;
 }
 
+void ConfigMigration() {
+    wchar_t temp[MAX_PATH] = {}, unique[MAX_PATH] = {};
+    Check(GetTempPathW(MAX_PATH, temp) != 0 && GetTempFileNameW(temp, L"pwp", 0, unique),
+          "create temporary path");
+    DeleteFileW(unique);
+    Check(CreateDirectoryW(unique, nullptr) != FALSE, "create temporary directory");
+    const std::wstring root = unique;
+    const std::wstring legacy = root + L"\\old";
+    const std::wstring target = root + L"\\new";
+    Check(CreateDirectoryW(legacy.c_str(), nullptr) != FALSE, "create legacy directory");
+    const std::wstring old_file = legacy + L"\\config.ini";
+    const std::wstring new_file = target + L"\\config.ini";
+    Check(WritePrivateProfileStringW(L"settings", L"video", L"original", old_file.c_str()),
+          "write legacy config");
+    Check(WritePrivateProfileStringW(L"test", L"blocked", L"1", target.c_str()),
+          "block destination directory with a file");
+    Check(!MigrateLegacyConfig(legacy, target), "report failed migration");
+    Check(DeleteFileW(target.c_str()) != FALSE, "remove migration blocker");
+    Check(MigrateLegacyConfig(legacy, target), "copy legacy config");
+    wchar_t value[64] = {};
+    GetPrivateProfileStringW(L"settings", L"video", L"", value, 64, new_file.c_str());
+    Check(std::wstring(value) == L"original", "copied config contents");
+    Check(WritePrivateProfileStringW(L"settings", L"video", L"new", new_file.c_str()),
+          "change new config");
+    Check(MigrateLegacyConfig(legacy, target), "repeat config migration");
+    GetPrivateProfileStringW(L"settings", L"video", L"", value, 64, new_file.c_str());
+    Check(std::wstring(value) == L"new", "do not overwrite new config");
+    GetPrivateProfileStringW(L"settings", L"video", L"", value, 64, old_file.c_str());
+    Check(std::wstring(value) == L"original", "preserve legacy config");
+    DeleteFileW(new_file.c_str());
+    DeleteFileW(old_file.c_str());
+    Check(MigrateLegacyConfig(legacy, target), "missing legacy config is harmless");
+    RemoveDirectoryW(target.c_str());
+    RemoveDirectoryW(legacy.c_str());
+    RemoveDirectoryW(root.c_str());
+}
+
+void StartupMigration() {
+    IsolatedRegistry registry;
+    HKEY run = nullptr;
+    Check(RegCreateKeyExW(HKEY_CURRENT_USER, kRunKey, 0, nullptr, 0, KEY_ALL_ACCESS,
+                          nullptr, &run, nullptr) == ERROR_SUCCESS, "create Run key");
+    constexpr wchar_t command[] = L"legacy command";
+    const auto write_legacy = [&] {
+        Check(RegSetValueExW(run, kLegacyValue, 0, REG_SZ,
+              reinterpret_cast<const BYTE*>(command), sizeof(command)) == ERROR_SUCCESS,
+              "create legacy value");
+    };
+    const auto exists = [&](const wchar_t* name) {
+        return RegQueryValueExW(run, name, nullptr, nullptr, nullptr, nullptr) == ERROR_SUCCESS;
+    };
+    write_legacy();
+    bool enabled = true;
+    Check(MigrateLegacyRunAtStartup(enabled) && ReconcileRunAtStartup(enabled) && enabled &&
+          !exists(kLegacyValue) && exists(kValue), "enabled legacy entry migrates");
+    write_legacy();
+    enabled = false;
+    Check(MigrateLegacyRunAtStartup(enabled) && ReconcileRunAtStartup(enabled) && !enabled &&
+          !exists(kLegacyValue) && !exists(kValue), "disabled legacy entry is removed");
+    enabled = true;
+    Check(MigrateLegacyRunAtStartup(enabled) && ReconcileRunAtStartup(enabled) && !enabled &&
+          !exists(kValue), "no legacy entry preserves reconciliation behavior");
+    RegCloseKey(run);
+}
+
 void StartupReconciliation() {
     IsolatedRegistry registry;
     bool enabled = true;
@@ -350,7 +417,7 @@ void StartupReconciliation() {
     HKEY run = nullptr;
     Check(RegOpenKeyExW(HKEY_CURRENT_USER, kRunKey, 0, KEY_SET_VALUE, &run) == ERROR_SUCCESS,
           "open isolated Run key");
-    constexpr wchar_t moved[] = L"\"C:\\old location\\LiteWallpaper-MF.exe\" --startup";
+    constexpr wchar_t moved[] = L"\"C:\\old location\\PicoWallpaper.exe\" --startup";
     const LSTATUS write = RegSetValueExW(run, kValue, 0, REG_SZ,
         reinterpret_cast<const BYTE*>(moved), sizeof(moved));
     RegCloseKey(run);
@@ -403,6 +470,8 @@ int main() {
     run("pixel aspect ratio", PixelAspectRatio);
     run("color metadata", ColorMetadata);
     run("driver color support", DriverColorSupport);
+    run("config migration", ConfigMigration);
+    run("startup migration", StartupMigration);
     run("startup reconciliation", StartupReconciliation);
     MFShutdown();
     CoUninitialize();

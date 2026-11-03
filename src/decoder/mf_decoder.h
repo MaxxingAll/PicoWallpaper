@@ -10,7 +10,7 @@
 
 #include <string>
 
-namespace miniwp {
+namespace picowp {
 
 class MFDecoder final : public IVideoDecoder {
 public:
@@ -43,4 +43,4 @@ private:
     bool m_mf_started = false;
 };
 
-} // namespace miniwp
+} // namespace picowp

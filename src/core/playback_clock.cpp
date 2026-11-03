@@ -1,7 +1,7 @@
 #include "playback_clock.h"
 #include <windows.h>
 
-namespace miniwp {
+namespace picowp {
 
 PlaybackClock::PlaybackClock() {
     SetTargetFPS(30);
@@ -66,4 +66,4 @@ int64_t PlaybackClock::GetCurrentTimeMicros() {
     return static_cast<int64_t>((counts / freq) * 1000000ULL + ((counts % freq) * 1000000ULL) / freq);
 }
 
-} // namespace miniwp
+} // namespace picowp

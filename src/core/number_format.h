@@ -4,7 +4,7 @@
 #include <limits>
 #include <string>
 
-namespace miniwp {
+namespace picowp {
 
 inline std::string HResultHex(uint32_t value) {
     constexpr char digits[] = "0123456789ABCDEF";
@@ -30,4 +30,4 @@ inline std::wstring IntDecimal(int value) {
     return std::wstring(current, end);
 }
 
-} // namespace miniwp
+} // namespace picowp

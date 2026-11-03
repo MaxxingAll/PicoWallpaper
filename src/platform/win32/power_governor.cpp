@@ -1,10 +1,11 @@
 #include "power_governor.h"
+#include "window_classes.h"
 
 #include <cstdlib>
 #include <dwmapi.h>
 #include <shellapi.h>
 
-namespace miniwp {
+namespace picowp {
 namespace {
 
 bool IsAppWindow(HWND window) {
@@ -21,7 +22,7 @@ bool IsAppWindow(HWND window) {
     return wcscmp(class_name, L"Progman") != 0 &&
            wcscmp(class_name, L"WorkerW") != 0 &&
            wcscmp(class_name, L"Shell_TrayWnd") != 0 &&
-           wcscmp(class_name, L"LiteWallpaperMFWindow") != 0;
+           wcscmp(class_name, kRenderClassName) != 0;
 }
 
 } // namespace
@@ -128,4 +129,4 @@ void PowerGovernor::Shutdown() {
     m_hwnd = nullptr;
 }
 
-} // namespace miniwp
+} // namespace picowp

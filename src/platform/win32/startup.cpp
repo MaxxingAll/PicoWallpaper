@@ -4,11 +4,12 @@
 
 #include <string>
 
-namespace miniwp {
+namespace picowp {
 namespace {
 
 constexpr wchar_t kRunKey[] = L"Software\\Microsoft\\Windows\\CurrentVersion\\Run";
-constexpr wchar_t kValueName[] = L"LiteWallpaper-MF";
+constexpr wchar_t kValueName[] = L"PicoWallpaper";
+constexpr wchar_t kLegacyValueName[] = L"LiteWallpaper-MF";
 
 std::wstring StartupCommand() {
     wchar_t executable[32768] = {};
@@ -42,6 +43,26 @@ bool SetRunAtStartup(bool enabled) {
     return status == ERROR_SUCCESS;
 }
 
+bool MigrateLegacyRunAtStartup(bool enabled) {
+    HKEY key = nullptr;
+    LSTATUS status = RegOpenKeyExW(HKEY_CURRENT_USER, kRunKey, 0,
+                                    KEY_QUERY_VALUE | KEY_SET_VALUE, &key);
+    if (status == ERROR_FILE_NOT_FOUND || status == ERROR_PATH_NOT_FOUND) return true;
+    if (status != ERROR_SUCCESS) return false;
+    status = RegQueryValueExW(key, kLegacyValueName, nullptr, nullptr, nullptr, nullptr);
+    if (status == ERROR_FILE_NOT_FOUND) {
+        RegCloseKey(key);
+        return true;
+    }
+    if (status != ERROR_SUCCESS || !SetRunAtStartup(enabled)) {
+        RegCloseKey(key);
+        return false;
+    }
+    status = RegDeleteValueW(key, kLegacyValueName);
+    RegCloseKey(key);
+    return status == ERROR_SUCCESS || status == ERROR_FILE_NOT_FOUND;
+}
+
 bool ReconcileRunAtStartup(bool& enabled) {
     if (!enabled) return true;
     DWORD bytes = 0;
@@ -67,4 +88,4 @@ bool ReconcileRunAtStartup(bool& enabled) {
     return existing == expected || SetRunAtStartup(true);
 }
 
-} // namespace miniwp
+} // namespace picowp
