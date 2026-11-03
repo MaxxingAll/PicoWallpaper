@@ -244,7 +244,7 @@ Rust rewrite, per-monitor video, playlists, audio, HDR, FIXTODO 6 (tray double-c
 
 | Task | Branch / PR | CI run | Result (bytes, tests) | Owner measurement |
 |---|---|---|---|---|
-| R1 | | | | Pending (owner) |
+| R1 | `chore/rename-picowallpaper` / #4 | [41603489179](https://github.com/MaxxingAll/PicoWallpaper/actions/runs/41603489179) | 218,624 → 219,648 bytes. Debug/Release CTest passed, including config migration, failure/retry and enabled/disabled autostart migration. Renamed exe and map artifacts uploaded. | Pending (owner) |
 | P0.1 | `perf/p0-measure` / #1 | [41426394525](https://github.com/MaxxingAll/PicoWallpaper/actions/runs/41426394525) | 583,168 → 583,168 bytes. Debug/Release CTest passed. Section sizes and imports logged; map downloaded (374,136 bytes). | — |
 | P0.2 | `perf/p0-measure` / #1 | [41426508723](https://github.com/MaxxingAll/PicoWallpaper/actions/runs/41426508723) | 583,168 → 583,168 bytes. Debug/Release CTest passed. | — |
 | P0.3 | — | — | — | Pending (owner) |
