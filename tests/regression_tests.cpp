@@ -1,3 +1,4 @@
+#include "core/number_format.h"
 #include "decoder/mf_video_format.h"
 #include "platform/win32/d3d11_presenter.h"
 #include "platform/win32/startup.h"
@@ -7,6 +8,7 @@
 #include <wrl/client.h>
 
 #include <cstdio>
+#include <limits>
 #include <stdexcept>
 #include <string>
 
@@ -17,6 +19,18 @@ namespace {
 
 void Check(bool condition, const char* message) {
     if (!condition) throw std::runtime_error(message);
+}
+
+void NumberFormatting() {
+    Check(HResultHex(0) == "0x00000000", "format zero HRESULT");
+    Check(HResultHex(0x80070005u) == "0x80070005", "format failing HRESULT");
+    Check(HResultHex(0xabcdef01u) == "0xABCDEF01", "format uppercase hex digits");
+    Check(HResultHex(0xffffffffu) == "0xFFFFFFFF", "format all HRESULT bits");
+    Check(IntDecimal(0) == L"0", "format zero integer");
+    Check(IntDecimal(1) == L"1" && IntDecimal(-1) == L"-1", "format signed integers");
+    Check(IntDecimal(1000000000) == L"1000000000", "format decimal zeros");
+    Check(IntDecimal(std::numeric_limits<int>::min()) == L"-2147483648", "format INT_MIN");
+    Check(IntDecimal(std::numeric_limits<int>::max()) == L"2147483647", "format INT_MAX");
 }
 
 ComPtr<IMFMediaType> MediaType(UINT32 width, UINT32 height) {
@@ -384,6 +398,7 @@ int main() {
             std::fprintf(stderr, "FAIL %s: %s\n", name, error.what());
         }
     };
+    run("number formatting", NumberFormatting);
     run("visible geometry", VisibleGeometry);
     run("pixel aspect ratio", PixelAspectRatio);
     run("color metadata", ColorMetadata);

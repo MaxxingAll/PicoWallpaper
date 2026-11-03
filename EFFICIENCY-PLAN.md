@@ -249,9 +249,9 @@ Rust rewrite, per-monitor video, playlists, audio, HDR, FIXTODO 6 (tray double-c
 | P0.1 | `perf/p0-measure` / #1 | [41426394525](https://github.com/MaxxingAll/PicoWallpaper/actions/runs/41426394525) | 583,168 → 583,168 bytes. Debug/Release CTest passed. Section sizes and imports logged; map downloaded (374,136 bytes). | — |
 | P0.2 | `perf/p0-measure` / #1 | [41426508723](https://github.com/MaxxingAll/PicoWallpaper/actions/runs/41426508723) | 583,168 → 583,168 bytes. Debug/Release CTest passed. | — |
 | P0.3 | — | — | — | Pending (owner) |
-| P1.1 | | | | Pending (owner) |
-| P1.2 | | | | Pending (owner) |
-| P1.3 | | | | — |
+| P1.1 | `perf/p1-size` / #2 | [41426763606](https://github.com/MaxxingAll/PicoWallpaper/actions/runs/41426763606) | 583,168 → 403,456 bytes. Debug/Release CTest passed. Icon ID 1 retained. | Pending (owner) |
+| P1.2 | `perf/p1-size` / #2 | [41426805260](https://github.com/MaxxingAll/PicoWallpaper/actions/runs/41426805260) | 403,456 → 333,312 bytes. Debug/Release CTest passed. ICO: 179,520 → 109,649 bytes; all seven decoded images match. Missed 60 KB target; owner accepted the verified lossless version. | Pending (owner) |
+| P1.3 | `perf/p1-size` / #2 | [41426834216](https://github.com/MaxxingAll/PicoWallpaper/actions/runs/41426834216) | 333,312 → 295,424 bytes. Debug/Release CTest passed, including formatter boundaries. Formatting routines removed; literal object-name check unmet (see below). | — |
 | P1.4 | — | — | Dropped (D1: No) | — |
 | P3.1 | | | | Pending (owner) |
 | P3.2 | | | | Pending (owner) |
@@ -261,3 +261,12 @@ Rust rewrite, per-monitor video, playlists, audio, HDR, FIXTODO 6 (tray double-c
 | P4.3 | | | | Pending (owner) |
 | P5.1 | | | | Pending (owner) |
 | P5.2 | | | | — |
+
+P1.3 investigation: the [Release linker trace](https://github.com/MaxxingAll/PicoWallpaper/actions/runs/41427216253)
+reports 28 discarded `__stdio_common_v*` routines. The map no longer lists `snprintf`, `swprintf_s`,
+`__stdio_common_vsprintf`, `__stdio_common_vswprintf_s` or `printf_count_output.obj`.
+The [Release disassembly](https://github.com/MaxxingAll/PicoWallpaper/actions/runs/41427504985) shows
+`_invalid_parameter`, `_fflush_nolock` and `fclose` calling `get_raw_ptd`, and `_mbtowc_internal` and
+`_write_nolock` calling `update_locale_slow`. These are the two functions attributed to `libucrt:output.obj`.
+CRT startup (`post_pgo_initialization`) also calls `__scrt_initialize_default_local_stdio_options`, which
+calls `__local_stdio_printf_options`. The static CRT still uses these helpers after both app call sites are replaced.
