@@ -74,10 +74,22 @@ bool g_running = true;
 bool g_manual_paused = false;
 bool g_device_lost = false;
 bool g_syncing = false;
+bool g_playing = false;
 bool g_screens_dirty = false;
 ULONGLONG g_last_attach_attempt = 0;
 
 constexpr wchar_t kControlClassName[] = L"PicoWallpaperControl";
+constexpr UINT_PTR kModalPlaybackTimer = 1;
+
+// Menus, dialogs and message boxes run their own message loop, so the main loop
+// stops. Their loops still dispatch WM_TIMER, which keeps playback going; the
+// timer exists only while one is open, so normal playback has no extra wake-ups.
+struct ModalPlayback {
+    ModalPlayback() { if (g_control) SetTimer(g_control, kModalPlaybackTimer, USER_TIMER_MINIMUM, nullptr); }
+    ~ModalPlayback() { if (g_control) KillTimer(g_control, kModalPlaybackTimer); }
+    ModalPlayback(const ModalPlayback&) = delete;
+    ModalPlayback& operator=(const ModalPlayback&) = delete;
+};
 
 std::wstring Utf8ToWide(const std::string& value) {
     if (value.empty()) return {};
@@ -163,6 +175,8 @@ void QueueDecoderError(const Screen& screen, const std::string& fallback) {
 }
 
 void ShowPendingErrors() {
+    if (g_pending_errors.empty()) return;
+    ModalPlayback playback;
     while (!g_pending_errors.empty()) {
         const std::wstring message = g_pending_errors.front();
         g_pending_errors.erase(g_pending_errors.begin());
@@ -556,9 +570,56 @@ LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM wparam,
     return DefWindowProcW(window, message, wparam, lparam);
 }
 
+// One playback step for every screen: pause/resume and render the frames that are
+// due. Returns the milliseconds until the next frame; adds frame-latency handles.
+DWORD PlayScreens(HANDLE* frame_waits, DWORD capacity, DWORD& wait_count) {
+    if (g_playing || g_syncing) return 200;
+    g_playing = true;
+    const AppConfig& config = g_config.Get();
+    const PowerState power = g_governor.GetCurrentState(
+        config.pause_on_fullscreen, config.pause_on_maximized,
+        config.pause_on_battery);
+    const bool all_paused = g_manual_paused || power == PowerState::Paused ||
+                            power == PowerState::Sleeping;
+
+    DWORD wait_ms = 200;
+    bool suspended_now = false;
+    bool all_suspended = true;
+    for (auto& screen : g_screens) {
+        // A maximized window pauses only the monitor it is on.
+        if (all_paused || (config.pause_on_maximized &&
+                           g_governor.IsMaximizedOn(screen->monitor.rect))) {
+            suspended_now |= EnterSuspend(*screen);
+            continue;
+        }
+        all_suspended = false;
+        LeaveSuspend(*screen);
+        if (!screen->window || !screen->decoder_open || g_device_lost) continue;
+        RenderNextFrame(*screen, power);
+        wait_ms = (std::min)(wait_ms,
+                             static_cast<DWORD>((std::min)(16u, screen->clock.GetSleepDurationMs())));
+        HANDLE frame_wait = screen->presenter.GetWaitableObject();
+        if (frame_wait && wait_count < capacity) frame_waits[wait_count++] = frame_wait;
+    }
+    // Trim only when nothing plays; a playing screen would fault the pages back in.
+    if (suspended_now && all_suspended) {
+        SetProcessWorkingSetSize(GetCurrentProcess(), static_cast<SIZE_T>(-1),
+                                 static_cast<SIZE_T>(-1));
+    }
+    g_playing = false;
+    return wait_ms;
+}
+
 LRESULT CALLBACK ControlProc(HWND window, UINT message, WPARAM wparam,
                              LPARAM lparam) {
+    if (message == WM_TIMER && wparam == kModalPlaybackTimer) {
+        DWORD unused = 0;
+        PlayScreens(nullptr, 0, unused);
+        return 0;
+    }
     if (message == WM_APP_TRAYICON) {
+        // The tray menu and the dialogs it opens run modal loops on this thread.
+        ModalPlayback playback;
         g_tray.HandleMessage(lparam);
         return 0;
     }
@@ -725,41 +786,9 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, LPWSTR, int) {
             }
         }
 
-        const AppConfig& config = g_config.Get();
-        const PowerState power = g_governor.GetCurrentState(
-            config.pause_on_fullscreen, config.pause_on_maximized,
-            config.pause_on_battery);
-        const bool all_paused = g_manual_paused || power == PowerState::Paused ||
-                                power == PowerState::Sleeping;
-
         HANDLE frame_waits[MAXIMUM_WAIT_OBJECTS - 1] = {};
         DWORD wait_count = 0;
-        DWORD wait_ms = 200;
-        bool suspended_now = false;
-        bool all_suspended = true;
-        for (auto& screen : g_screens) {
-            // A maximized window pauses only the monitor it is on.
-            if (all_paused || (config.pause_on_maximized &&
-                               g_governor.IsMaximizedOn(screen->monitor.rect))) {
-                suspended_now |= EnterSuspend(*screen);
-                continue;
-            }
-            all_suspended = false;
-            LeaveSuspend(*screen);
-            if (!screen->window || !screen->decoder_open || g_device_lost) continue;
-            RenderNextFrame(*screen, power);
-            wait_ms = (std::min)(wait_ms,
-                                 static_cast<DWORD>((std::min)(16u, screen->clock.GetSleepDurationMs())));
-            HANDLE frame_wait = screen->presenter.GetWaitableObject();
-            if (frame_wait && wait_count < _countof(frame_waits)) {
-                frame_waits[wait_count++] = frame_wait;
-            }
-        }
-        // Trim only when nothing plays; a playing screen would fault the pages back in.
-        if (suspended_now && all_suspended) {
-            SetProcessWorkingSetSize(GetCurrentProcess(), static_cast<SIZE_T>(-1),
-                                     static_cast<SIZE_T>(-1));
-        }
+        DWORD wait_ms = PlayScreens(frame_waits, _countof(frame_waits), wait_count);
         if (wait_ms == 0) wait_ms = 1;
         MsgWaitForMultipleObjectsEx(wait_count, frame_waits, wait_ms, QS_ALLINPUT,
                                     MWMO_INPUTAVAILABLE);

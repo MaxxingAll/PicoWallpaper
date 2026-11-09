@@ -28,6 +28,10 @@ the `[monitors]` config at startup, on `WM_DISPLAYCHANGE`, after an Explorer
 restart and after tray changes. Monitors are keyed by their device interface path,
 so a choice stays with the physical monitor when display numbers change.
 
+The tray menu, file dialog and message boxes run modal loops on the main thread.
+While one is open, a `USER_TIMER_MINIMUM` timer (`ModalPlayback`) calls `PlayScreens`,
+so the wallpaper keeps playing; the timer is killed when the menu or dialog closes.
+
 `wWinMain` first sets the `MicrosoftSignedOnly` process signature policy, so injected
 overlay DLLs (RTSS, Discord, Steam) fail to load. Measured on an RTX 5070: RTSSHooks64
 blocked; NVIDIA user-mode driver, VP9 Store extension and H.264 decoder load. Third-party
