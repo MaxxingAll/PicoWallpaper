@@ -27,6 +27,7 @@
 #include "platform/win32/window_classes.h"
 
 #define WM_APP_ATTACH (WM_APP + 11)
+#define WM_APP_PLAY (WM_APP + 12)
 
 using namespace picowp;
 
@@ -79,16 +80,36 @@ bool g_screens_dirty = false;
 ULONGLONG g_last_attach_attempt = 0;
 
 constexpr wchar_t kControlClassName[] = L"PicoWallpaperControl";
-constexpr UINT_PTR kModalPlaybackTimer = 1;
+LONG volatile g_play_posted = 0;
 
 // Menus, dialogs and message boxes run their own message loop, so the main loop
-// stops. Their loops still dispatch WM_TIMER, which keeps playback going; the
-// timer exists only while one is open, so normal playback has no extra wake-ups.
+// stops. A thread-pool timer posts WM_APP_PLAY to keep playback going: their loops
+// dispatch it, and posted messages come before mouse input (WM_TIMER is starved
+// while the mouse moves over a menu). One message is pending at most. The timer
+// exists only while a menu or dialog is open, so normal playback has no extra wake-ups.
+VOID CALLBACK PostPlay(PVOID, BOOLEAN) {
+    if (InterlockedExchange(&g_play_posted, 1) == 0 &&
+        !PostMessageW(g_control, WM_APP_PLAY, 0, 0)) {
+        InterlockedExchange(&g_play_posted, 0);
+    }
+}
+
 struct ModalPlayback {
-    ModalPlayback() { if (g_control) SetTimer(g_control, kModalPlaybackTimer, USER_TIMER_MINIMUM, nullptr); }
-    ~ModalPlayback() { if (g_control) KillTimer(g_control, kModalPlaybackTimer); }
+    ModalPlayback() {
+        if (g_control && !CreateTimerQueueTimer(&m_timer, nullptr, PostPlay, nullptr, 0, 10,
+                                                WT_EXECUTEDEFAULT)) {
+            m_timer = nullptr;
+        }
+    }
+    ~ModalPlayback() {
+        // Waits for a running callback; callbacks only post, so this cannot block long.
+        if (m_timer) DeleteTimerQueueTimer(nullptr, m_timer, INVALID_HANDLE_VALUE);
+    }
     ModalPlayback(const ModalPlayback&) = delete;
     ModalPlayback& operator=(const ModalPlayback&) = delete;
+
+private:
+    HANDLE m_timer = nullptr;
 };
 
 std::wstring Utf8ToWide(const std::string& value) {
@@ -612,7 +633,8 @@ DWORD PlayScreens(HANDLE* frame_waits, DWORD capacity, DWORD& wait_count) {
 
 LRESULT CALLBACK ControlProc(HWND window, UINT message, WPARAM wparam,
                              LPARAM lparam) {
-    if (message == WM_TIMER && wparam == kModalPlaybackTimer) {
+    if (message == WM_APP_PLAY) {
+        InterlockedExchange(&g_play_posted, 0);
         DWORD unused = 0;
         PlayScreens(nullptr, 0, unused);
         return 0;
