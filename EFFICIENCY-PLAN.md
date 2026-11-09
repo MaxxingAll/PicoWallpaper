@@ -236,7 +236,9 @@ Per-monitor video was added outside this plan (owner request 2026-11-09, `feat/p
 Since then `main.cpp` keeps one `Screen` per monitor with a video (window, swap chain, decoder, clock)
 on a shared `D3D11Device`; tasks above that name `g_presenter`, `g_decoder`, `g_frame`, `ResizeToDesktop` or
 `RebuildGraphics` apply per screen (`SyncScreens`, `RecoverDevice`). For P4.1 the snapshot is per screen
-(monitor width × height × 4 bytes each), and pausing still applies to all screens together.
+(monitor width × height × 4 bytes each). A maximized window pauses only its own monitor's screen
+(`PowerGovernor::IsMaximizedOn`; the `Occluded` state is gone); fullscreen, battery, lock/sleep and manual pause still
+pause all screens. P4.1's "governor pauses" therefore means `Paused`/`Sleeping` or a maximized window on that monitor.
 
 ## Owner decisions
 

@@ -719,24 +719,22 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, LPWSTR, int) {
         const PowerState power = g_governor.GetCurrentState(
             config.pause_on_fullscreen, config.pause_on_maximized,
             config.pause_on_battery);
-        const bool governor_paused = power == PowerState::Paused ||
-                                     power == PowerState::Occluded ||
-                                     power == PowerState::Sleeping;
-        if (g_manual_paused || governor_paused) {
-            bool suspended_now = false;
-            for (auto& screen : g_screens) suspended_now |= EnterSuspend(*screen);
-            if (suspended_now) {
-                SetProcessWorkingSetSize(GetCurrentProcess(), static_cast<SIZE_T>(-1),
-                                         static_cast<SIZE_T>(-1));
-            }
-            MsgWaitForMultipleObjects(0, nullptr, FALSE, 200, QS_ALLINPUT);
-            continue;
-        }
+        const bool all_paused = g_manual_paused || power == PowerState::Paused ||
+                                power == PowerState::Sleeping;
 
         HANDLE frame_waits[MAXIMUM_WAIT_OBJECTS - 1] = {};
         DWORD wait_count = 0;
         DWORD wait_ms = 200;
+        bool suspended_now = false;
+        bool all_suspended = true;
         for (auto& screen : g_screens) {
+            // A maximized window pauses only the monitor it is on.
+            if (all_paused || (config.pause_on_maximized &&
+                               g_governor.IsMaximizedOn(screen->monitor.rect))) {
+                suspended_now |= EnterSuspend(*screen);
+                continue;
+            }
+            all_suspended = false;
             LeaveSuspend(*screen);
             if (!screen->window || !screen->decoder_open || g_device_lost) continue;
             RenderNextFrame(*screen, power);
@@ -746,6 +744,11 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, LPWSTR, int) {
             if (frame_wait && wait_count < _countof(frame_waits)) {
                 frame_waits[wait_count++] = frame_wait;
             }
+        }
+        // Trim only when nothing plays; a playing screen would fault the pages back in.
+        if (suspended_now && all_suspended) {
+            SetProcessWorkingSetSize(GetCurrentProcess(), static_cast<SIZE_T>(-1),
+                                     static_cast<SIZE_T>(-1));
         }
         if (wait_ms == 0) wait_ms = 1;
         MsgWaitForMultipleObjectsEx(wait_count, frame_waits, wait_ms, QS_ALLINPUT,

@@ -28,7 +28,8 @@ This project is a GPL-3.0 fork of `f4rdani/LiteWallpaper`.
    behavior or autostart; **Exit** closes the app.
 
 Monitor numbers are the Windows display numbers (Settings → System → Display → Identify).
-Pause, FPS cap and pause rules apply to all monitors.
+A maximized window pauses only the monitor it is on. Fullscreen apps, battery,
+lock and **Settings → Pause** pause all monitors; the FPS cap applies to all.
 
 Settings are stored in `%APPDATA%\PicoWallpaper\config.ini`; each monitor's video
 is listed under `[monitors]`. On first launch,

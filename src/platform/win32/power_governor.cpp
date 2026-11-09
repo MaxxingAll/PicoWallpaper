@@ -47,11 +47,11 @@ PowerState PowerGovernor::GetCurrentState(bool pause_fullscreen,
     if (now - m_last_check < 250) return m_cached_state;
     m_last_check = now;
     m_on_battery = IsOnBattery();
+    m_maximized_monitors.clear();
+    if (pause_maximized) FindMaximizedMonitors();
 
     if (pause_fullscreen && IsFullscreenAppRunning()) {
         m_cached_state = PowerState::Paused;
-    } else if (pause_maximized && IsMaximizedAppRunning()) {
-        m_cached_state = PowerState::Occluded;
     } else if (m_on_battery && pause_on_battery) {
         m_cached_state = PowerState::Paused;
     } else if (m_on_battery) {
@@ -97,26 +97,28 @@ bool PowerGovernor::IsFullscreenAppRunning() const {
            rect.right >= monitor.rcMonitor.right && rect.bottom >= monitor.rcMonitor.bottom;
 }
 
-bool PowerGovernor::IsMaximizedAppRunning() const {
-    HWND window = GetForegroundWindow();
-    if (IsAppWindow(window) && IsZoomed(window)) return true;
-
-    bool found = false;
+void PowerGovernor::FindMaximizedMonitors() {
     EnumWindows([](HWND candidate, LPARAM parameter) -> BOOL {
-        wchar_t class_name[64] = {};
-        GetClassNameW(candidate, class_name,
-                      static_cast<int>(_countof(class_name)));
-        if (wcscmp(class_name, L"Progman") == 0 ||
-            wcscmp(class_name, L"WorkerW") == 0) {
+        if (!IsAppWindow(candidate) || !IsZoomed(candidate)) return TRUE;
+        MONITORINFO monitor = {};
+        monitor.cbSize = sizeof(monitor);
+        if (!GetMonitorInfoW(MonitorFromWindow(candidate, MONITOR_DEFAULTTONEAREST), &monitor)) {
             return TRUE;
         }
-        if (IsAppWindow(candidate) && IsZoomed(candidate)) {
-            *reinterpret_cast<bool*>(parameter) = true;
-            return FALSE;
+        auto* monitors = reinterpret_cast<std::vector<RECT>*>(parameter);
+        for (const RECT& known : *monitors) {
+            if (EqualRect(&known, &monitor.rcMonitor)) return TRUE;
         }
+        monitors->push_back(monitor.rcMonitor);
         return TRUE;
-    }, reinterpret_cast<LPARAM>(&found));
-    return found;
+    }, reinterpret_cast<LPARAM>(&m_maximized_monitors));
+}
+
+bool PowerGovernor::IsMaximizedOn(const RECT& monitor) const {
+    for (const RECT& maximized : m_maximized_monitors) {
+        if (EqualRect(&maximized, &monitor)) return true;
+    }
+    return false;
 }
 
 bool PowerGovernor::IsOnBattery() {

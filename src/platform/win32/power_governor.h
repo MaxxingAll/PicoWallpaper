@@ -3,13 +3,14 @@
 #include <windows.h>
 #include <wtsapi32.h>
 
+#include <vector>
+
 namespace picowp {
 
 enum class PowerState {
     Active,
     Reduced,
     Paused,
-    Occluded,
     Sleeping,
 };
 
@@ -21,15 +22,19 @@ public:
     PowerState GetCurrentState(bool pause_fullscreen,
                                bool pause_maximized,
                                bool pause_on_battery);
+    // A maximized app window is on this monitor (as of the last GetCurrentState
+    // check with pause_maximized on). Only that monitor's video pauses.
+    bool IsMaximizedOn(const RECT& monitor) const;
     void HandleSessionChange(WPARAM event);
     void HandlePowerChange(WPARAM event);
     void Shutdown();
 
 private:
     bool IsFullscreenAppRunning() const;
-    bool IsMaximizedAppRunning() const;
+    void FindMaximizedMonitors();
     static bool IsOnBattery();
 
+    std::vector<RECT> m_maximized_monitors;
     HWND m_hwnd = nullptr;
     bool m_locked = false;
     bool m_suspended = false;
