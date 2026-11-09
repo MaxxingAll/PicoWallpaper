@@ -657,7 +657,7 @@ LRESULT CALLBACK ControlProc(HWND window, UINT message, WPARAM wparam,
             g_governor.HandleSessionChange(wparam);
             return 0;
         case WM_POWERBROADCAST:
-            g_governor.HandlePowerChange(wparam);
+            g_governor.HandlePowerChange(wparam, lparam);
             return TRUE;
         case WM_DISPLAYCHANGE:
             SyncScreens();

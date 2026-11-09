@@ -26,7 +26,7 @@ public:
     // check with pause_maximized on). Only that monitor's video pauses.
     bool IsMaximizedOn(const RECT& monitor) const;
     void HandleSessionChange(WPARAM event);
-    void HandlePowerChange(WPARAM event);
+    void HandlePowerChange(WPARAM event, LPARAM data);
     void Shutdown();
 
 private:
@@ -36,8 +36,10 @@ private:
 
     std::vector<RECT> m_maximized_monitors;
     HWND m_hwnd = nullptr;
+    HPOWERNOTIFY m_display_notification = nullptr;
     bool m_locked = false;
     bool m_suspended = false;
+    bool m_display_off = false;
     bool m_on_battery = false;
     ULONGLONG m_last_check = 0;
     PowerState m_cached_state = PowerState::Active;

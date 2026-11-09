@@ -14,7 +14,8 @@ This project is a GPL-3.0 fork of `f4rdani/LiteWallpaper`.
 - WorkerW desktop integration
 - A separate video for each monitor; a monitor without one keeps the Windows wallpaper
 - Native system-tray controls; no web runtime or UI framework
-- Automatic pause for fullscreen apps, maximized apps, lock, and optionally battery
+- Automatic pause for fullscreen apps, maximized apps, lock, screens turned off by the
+  display timeout, and optionally battery
 - 15, 30, 60, or native FPS cap
 - Plain HKCU `Run` autostart entry
 - Loads only Microsoft-signed modules, so overlays and hooks (RTSS, Discord, Steam)

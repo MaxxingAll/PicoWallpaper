@@ -8,8 +8,16 @@
 namespace picowp {
 namespace {
 
+// GUID_CONSOLE_DISPLAY_STATE: Data[0] is 0 = off, 1 = on, 2 = dimmed.
+constexpr GUID kConsoleDisplayState = {0x6fe69556, 0x704a, 0x47a0,
+                                       {0x8f, 0x24, 0xc2, 0x8d, 0x93, 0x6f, 0xda, 0x47}};
+
 bool IsAppWindow(HWND window) {
     if (!window || !IsWindowVisible(window) || IsIconic(window)) return false;
+
+    // Click-through overlays (cursor overlays, OSDs) can span the desktop but are not apps.
+    constexpr LONG_PTR kClickThrough = WS_EX_LAYERED | WS_EX_TRANSPARENT;
+    if ((GetWindowLongPtrW(window, GWL_EXSTYLE) & kClickThrough) == kClickThrough) return false;
 
     DWORD cloaked = 0;
     if (SUCCEEDED(DwmGetWindowAttribute(window, DWMWA_CLOAKED, &cloaked,
@@ -39,7 +47,12 @@ PowerGovernor::~PowerGovernor() {
 
 bool PowerGovernor::Init(HWND message_window) {
     m_hwnd = message_window;
-    if (m_hwnd) WTSRegisterSessionNotification(m_hwnd, NOTIFY_FOR_THIS_SESSION);
+    if (m_hwnd) {
+        WTSRegisterSessionNotification(m_hwnd, NOTIFY_FOR_THIS_SESSION);
+        // Windows answers with the current display state right away.
+        m_display_notification = RegisterPowerSettingNotification(
+            m_hwnd, &kConsoleDisplayState, DEVICE_NOTIFY_WINDOW_HANDLE);
+    }
     m_on_battery = IsOnBattery();
     return true;
 }
@@ -47,7 +60,8 @@ bool PowerGovernor::Init(HWND message_window) {
 PowerState PowerGovernor::GetCurrentState(bool pause_fullscreen,
                                           bool pause_maximized,
                                           bool pause_on_battery) {
-    if (m_locked || m_suspended) return PowerState::Sleeping;
+    // Screens turned off by the display timeout: nobody sees the wallpaper.
+    if (m_locked || m_suspended || m_display_off) return PowerState::Sleeping;
 
     const ULONGLONG now = GetTickCount64();
     if (now - m_last_check < 250) return m_cached_state;
@@ -55,7 +69,6 @@ PowerState PowerGovernor::GetCurrentState(bool pause_fullscreen,
     m_on_battery = IsOnBattery();
     m_maximized_monitors.clear();
     if (pause_maximized) FindMaximizedMonitors();
-
     if (pause_fullscreen && IsFullscreenAppRunning()) {
         m_cached_state = PowerState::Paused;
     } else if (m_on_battery && pause_on_battery) {
@@ -64,8 +77,7 @@ PowerState PowerGovernor::GetCurrentState(bool pause_fullscreen,
         m_cached_state = PowerState::Reduced;
     } else {
         m_cached_state = PowerState::Active;
-    }
-    return m_cached_state;
+    }    return m_cached_state;
 }
 
 void PowerGovernor::HandleSessionChange(WPARAM event) {
@@ -76,7 +88,15 @@ void PowerGovernor::HandleSessionChange(WPARAM event) {
     }
 }
 
-void PowerGovernor::HandlePowerChange(WPARAM event) {
+void PowerGovernor::HandlePowerChange(WPARAM event, LPARAM data) {
+    if (event == PBT_POWERSETTINGCHANGE && data) {
+        const auto* setting = reinterpret_cast<const POWERBROADCAST_SETTING*>(data);
+        if (IsEqualGUID(setting->PowerSetting, kConsoleDisplayState) &&
+            setting->DataLength >= sizeof(DWORD)) {
+            m_display_off = *reinterpret_cast<const DWORD*>(setting->Data) == 0;
+        }
+        return;
+    }
     if (event == PBT_APMSUSPEND) m_suspended = true;
     if (event == PBT_APMRESUMEAUTOMATIC) m_suspended = false;
     if (event == PBT_APMPOWERSTATUSCHANGE || event == PBT_APMRESUMEAUTOMATIC) {
@@ -133,6 +153,8 @@ bool PowerGovernor::IsOnBattery() {
 }
 
 void PowerGovernor::Shutdown() {
+    if (m_display_notification) UnregisterPowerSettingNotification(m_display_notification);
+    m_display_notification = nullptr;
     if (m_hwnd) WTSUnRegisterSessionNotification(m_hwnd);
     m_hwnd = nullptr;
 }
