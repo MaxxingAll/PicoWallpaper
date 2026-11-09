@@ -10,13 +10,17 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <memory>
 #include <string>
+#include <vector>
 
 #include "core/config.h"
+#include "core/number_format.h"
 #include "core/playback_clock.h"
 #include "decoder/mf_decoder.h"
 #include "platform/win32/d3d11_presenter.h"
 #include "platform/win32/desktop_injector.h"
+#include "platform/win32/monitors.h"
 #include "platform/win32/power_governor.h"
 #include "platform/win32/startup.h"
 #include "platform/win32/tray_icon.h"
@@ -28,33 +32,52 @@ using namespace picowp;
 
 namespace {
 
-D3D11Presenter g_presenter;
+// One monitor that plays a video. Monitors without a video have no Screen, so
+// the Windows wallpaper stays visible there.
+struct Screen {
+    MonitorInfo monitor;
+    std::string video_path;
+    HWND window = nullptr;
+    D3D11Presenter presenter;
+    MFDecoder decoder;
+    PlaybackClock clock;
+    VideoFrame frame;
+    VideoInfo video_info;
+    bool decoder_open = false;
+    bool suspended = false;
+    bool has_presented_frame = false;
+    double playback_seconds = 0.0;
+    uint64_t decoded_frames = 0;
+    double decode_accumulator = 0.0;
+};
+
+// Playback position of a destroyed screen, used when the same monitor and video return.
+struct ResumePoint {
+    std::wstring monitor_id;
+    std::string video_path;
+    double seconds = 0.0;
+};
+
+D3D11Device g_device;
 DesktopInjector g_injector;
-MFDecoder g_decoder;
 PowerGovernor g_governor;
 TrayIcon g_tray;
-PlaybackClock g_clock;
 
-HWND g_window = nullptr;
+std::vector<MonitorInfo> g_monitors;
+std::vector<std::unique_ptr<Screen>> g_screens;
+std::vector<ResumePoint> g_resume;
+std::vector<std::string> g_failed_videos;
+std::vector<std::wstring> g_pending_errors;
+
 HWND g_control = nullptr;
-VideoFrame g_frame;
-VideoInfo g_video_info;
 bool g_running = true;
 bool g_manual_paused = false;
-bool g_suspended = false;
-bool g_decoder_open = false;
-bool g_has_presented_frame = false;
 bool g_device_lost = false;
-std::string g_failed_video_path;
-double g_playback_seconds = 0.0;
-uint64_t g_decoded_frames = 0;
-double g_decode_accumulator = 0.0;
+bool g_syncing = false;
+bool g_screens_dirty = false;
 ULONGLONG g_last_attach_attempt = 0;
 
 constexpr wchar_t kControlClassName[] = L"PicoWallpaperControl";
-
-LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM wparam,
-                            LPARAM lparam);
 
 std::wstring Utf8ToWide(const std::string& value) {
     if (value.empty()) return {};
@@ -80,23 +103,75 @@ std::string WideToUtf8(const std::wstring& value) {
     return result;
 }
 
-void UpdateTrayState() {
-    const AppConfig& config = g_config.Get();
-    g_tray.UpdateState(g_manual_paused, config.pause_on_fullscreen,
-                       config.pause_on_maximized, config.pause_on_battery,
-                       config.fps_cap, config.run_on_startup);
+std::wstring FileName(const std::wstring& path) {
+    const size_t separator = path.find_last_of(L"\\/");
+    return separator == std::wstring::npos ? path : path.substr(separator + 1);
 }
 
-void ShowDecoderError(const std::string& fallback) {
-    std::string message = g_decoder.GetLastError();
+std::string VideoFor(const std::wstring& monitor_id) {
+    const auto& videos = g_config.Get().monitor_videos;
+    const auto found = videos.find(monitor_id);
+    return found == videos.end() ? std::string() : found->second;
+}
+
+const MonitorInfo* FindMonitor(const std::wstring& monitor_id) {
+    for (const MonitorInfo& monitor : g_monitors) {
+        if (monitor.id == monitor_id) return &monitor;
+    }
+    return nullptr;
+}
+
+Screen* FindScreen(const std::wstring& monitor_id) {
+    for (auto& screen : g_screens) {
+        if (screen->monitor.id == monitor_id) return screen.get();
+    }
+    return nullptr;
+}
+
+bool IsFailedVideo(const std::string& path) {
+    return std::find(g_failed_videos.begin(), g_failed_videos.end(), path) !=
+           g_failed_videos.end();
+}
+
+int Width(const RECT& rect) { return (std::max)(1L, rect.right - rect.left); }
+int Height(const RECT& rect) { return (std::max)(1L, rect.bottom - rect.top); }
+
+void UpdateTrayState() {
+    const AppConfig& config = g_config.Get();
+    std::vector<TrayMonitor> monitors;
+    std::wstring tooltip = L"PicoWallpaper";
+    for (const MonitorInfo& monitor : g_monitors) {
+        const std::wstring video = FileName(Utf8ToWide(VideoFor(monitor.id)));
+        monitors.push_back({MonitorLabel(monitor), video});
+        if (!video.empty()) {
+            tooltip += L"\nMonitor " + IntDecimal(monitor.number) + L": " + video;
+        }
+    }
+    g_tray.UpdateState(g_manual_paused, config.pause_on_fullscreen,
+                       config.pause_on_maximized, config.pause_on_battery,
+                       config.fps_cap, config.run_on_startup, std::move(monitors));
+    g_tray.SetTooltip(tooltip.c_str());
+}
+
+// Errors are shown from the main loop, never while g_screens is being iterated:
+// a message box pumps messages, and display changes rebuild the screen list.
+void QueueDecoderError(const Screen& screen, const std::string& fallback) {
+    std::string message = screen.decoder.GetLastError();
     if (message.empty()) message = fallback;
-    const std::wstring wide = Utf8ToWide(message);
-    MessageBoxW(nullptr, wide.c_str(), L"PicoWallpaper",
-                MB_OK | MB_ICONERROR);
+    g_pending_errors.push_back(L"Monitor " + IntDecimal(screen.monitor.number) + L": " +
+                               Utf8ToWide(message));
+}
+
+void ShowPendingErrors() {
+    while (!g_pending_errors.empty()) {
+        const std::wstring message = g_pending_errors.front();
+        g_pending_errors.erase(g_pending_errors.begin());
+        MessageBoxW(nullptr, message.c_str(), L"PicoWallpaper", MB_OK | MB_ICONERROR);
+    }
 }
 
 bool CheckDeviceLost() {
-    ID3D11Device* device = g_presenter.GetDevice();
+    ID3D11Device* device = g_device.Get();
     if (device && device->GetDeviceRemovedReason() != S_OK) {
         if (!g_device_lost) g_last_attach_attempt = 0;
         g_device_lost = true;
@@ -104,138 +179,125 @@ bool CheckDeviceLost() {
     return g_device_lost;
 }
 
-int NativeFps() {
-    if (g_video_info.fps < 1.0 || g_video_info.fps > 240.0) return 30;
-    return static_cast<int>(std::lround(g_video_info.fps));
+int NativeFps(const Screen& screen) {
+    if (screen.video_info.fps < 1.0 || screen.video_info.fps > 240.0) return 30;
+    return static_cast<int>(std::lround(screen.video_info.fps));
 }
 
-int EffectiveFpsCap(PowerState state) {
+int EffectiveFpsCap(const Screen& screen, PowerState state) {
     int cap = g_config.Get().fps_cap;
-    if (cap == 0) cap = NativeFps();
+    if (cap == 0) cap = NativeFps(screen);
     if (state == PowerState::Reduced) cap = (std::min)(cap, 15);
-    cap = (std::min)(cap, NativeFps());
+    cap = (std::min)(cap, NativeFps(screen));
     return (std::max)(1, cap);
 }
 
-bool OpenConfiguredVideo(double seek_seconds = 0.0, bool show_error = true) {
-    if (!g_window || !g_presenter.GetDevice()) return false;
+void CloseVideo(Screen& screen) {
+    screen.presenter.ReleaseFrameResources();
+    screen.frame = {};
+    screen.decoder.Close();
+    screen.decoder_open = false;
+}
+
+bool OpenVideo(Screen& screen, double seek_seconds, bool show_error) {
+    CloseVideo(screen);
+    screen.video_info = {};
+    if (!screen.window || !g_device.Get()) return false;
     // A reset can occur while suspended, when neither Decode nor Present runs.
     if (CheckDeviceLost()) return false;
 
-    g_presenter.ReleaseFrameResources();
-    g_frame = {};
-    g_decoder.Close();
-    g_decoder_open = false;
-    g_video_info = {};
-
-    const std::string& path = g_config.Get().video_path;
-    if (path == g_failed_video_path) return false;
+    const std::string& path = screen.video_path;
+    if (IsFailedVideo(path)) return false;
     const std::wstring wide_path = Utf8ToWide(path);
     const DWORD attributes = GetFileAttributesW(wide_path.c_str());
     if (wide_path.empty() || attributes == INVALID_FILE_ATTRIBUTES ||
         (attributes & FILE_ATTRIBUTE_DIRECTORY) != 0) {
         return false;
     }
-    if (!g_decoder.Open(path.c_str(), g_presenter.GetDevice())) {
+    if (!screen.decoder.Open(path.c_str(), g_device.Get())) {
         if (CheckDeviceLost()) return false;
         // Device failures stay on the recovery path. Ordinary file failures
         // must not cause a healthy graphics device to be rebuilt.
         if (show_error) {
-            g_failed_video_path = path;
-            ShowDecoderError("Windows could not open this video.");
+            g_failed_videos.push_back(path);
+            QueueDecoderError(screen, "Windows could not open this video.");
         }
         return false;
     }
 
-    g_video_info = g_decoder.GetInfo();
-    if (seek_seconds > 0.0) g_decoder.SeekTo(seek_seconds);
-    g_playback_seconds = (std::max)(0.0, seek_seconds);
-    g_decoded_frames = static_cast<uint64_t>(g_playback_seconds * NativeFps());
-    g_decode_accumulator = 0.0;
-    g_clock.SetTargetFPS(g_config.Get().fps_cap == 0
-                             ? NativeFps()
-                             : g_config.Get().fps_cap);
-    g_clock.Reset();
-    g_decoder_open = true;
-    g_suspended = false;
-    g_failed_video_path.clear();
-
-    std::wstring tooltip = L"PicoWallpaper - ";
-    const size_t separator = wide_path.find_last_of(L"\\/");
-    tooltip += separator == std::wstring::npos
-                   ? wide_path
-                   : wide_path.substr(separator + 1);
-    g_tray.SetTooltip(tooltip.c_str());
+    screen.video_info = screen.decoder.GetInfo();
+    if (seek_seconds > 0.0) screen.decoder.SeekTo(seek_seconds);
+    screen.playback_seconds = (std::max)(0.0, seek_seconds);
+    screen.decoded_frames = static_cast<uint64_t>(screen.playback_seconds * NativeFps(screen));
+    screen.decode_accumulator = 0.0;
+    screen.clock.SetTargetFPS(g_config.Get().fps_cap == 0 ? NativeFps(screen)
+                                                          : g_config.Get().fps_cap);
+    screen.clock.Reset();
+    screen.decoder_open = true;
+    screen.suspended = false;
     return true;
 }
 
-void EnterSuspend() {
-    if (g_suspended) return;
-    g_presenter.ReleaseFrameResources();
-    g_frame = {};
-    g_decoder.Close();
-    g_decoder_open = false;
-    g_suspended = true;
-    SetProcessWorkingSetSize(GetCurrentProcess(),
-                             static_cast<SIZE_T>(-1), static_cast<SIZE_T>(-1));
+bool EnterSuspend(Screen& screen) {
+    if (screen.suspended) return false;
+    CloseVideo(screen);
+    screen.suspended = true;
+    return true;
 }
 
-void LeaveSuspend() {
-    if (!g_suspended) return;
-    g_suspended = false;
-    OpenConfiguredVideo(g_playback_seconds);
+void LeaveSuspend(Screen& screen) {
+    if (!screen.suspended) return;
+    screen.suspended = false;
+    OpenVideo(screen, screen.playback_seconds, true);
 }
 
-bool RenderNextFrame(PowerState power_state) {
-    if (!g_window || !g_decoder_open || g_device_lost) return false;
-    const int cap = EffectiveFpsCap(power_state);
-    if (g_clock.GetTargetFPS() != cap) g_clock.SetTargetFPS(cap);
-    if (!g_clock.ShouldRenderFrame()) return false;
+bool RenderNextFrame(Screen& screen, PowerState power_state) {
+    if (!screen.window || !screen.decoder_open || g_device_lost) return false;
+    const int cap = EffectiveFpsCap(screen, power_state);
+    if (screen.clock.GetTargetFPS() != cap) screen.clock.SetTargetFPS(cap);
+    if (!screen.clock.ShouldRenderFrame()) return false;
 
-    const double native_fps = g_video_info.fps > 0.0 ? g_video_info.fps : 30.0;
-    g_decode_accumulator += native_fps / cap;
-    int frames = static_cast<int>(std::floor(g_decode_accumulator));
-    g_decode_accumulator -= frames;
+    const double native_fps = screen.video_info.fps > 0.0 ? screen.video_info.fps : 30.0;
+    screen.decode_accumulator += native_fps / cap;
+    int frames = static_cast<int>(std::floor(screen.decode_accumulator));
+    screen.decode_accumulator -= frames;
     frames = std::clamp(frames, 1, 16);
     bool decoded = false;
     for (int i = 0; i < frames; ++i) {
-        if (!g_decoder.DecodeNextFrame(g_frame)) break;
+        if (!screen.decoder.DecodeNextFrame(screen.frame)) break;
         decoded = true;
-        ++g_decoded_frames;
+        ++screen.decoded_frames;
     }
-    if (!decoded || !g_frame.texture) {
+    if (!decoded || !screen.frame.texture) {
         if (CheckDeviceLost()) return false;
-        if (!g_decoder.GetLastError().empty()) {
-            g_failed_video_path = g_config.Get().video_path;
-            ShowDecoderError("Video decoding failed.");
-            g_presenter.ReleaseFrameResources();
-            g_frame = {};
-            g_decoder.Close();
-            g_decoder_open = false;
+        if (!screen.decoder.GetLastError().empty()) {
+            g_failed_videos.push_back(screen.video_path);
+            QueueDecoderError(screen, "Video decoding failed.");
+            CloseVideo(screen);
         }
         return false;
     }
 
-    g_playback_seconds = g_frame.pts >= 0
-                             ? static_cast<double>(g_frame.pts) / 1000000.0
-                             : static_cast<double>(g_decoded_frames) / native_fps;
-    if (g_video_info.duration_seconds > 0.0) {
-        g_playback_seconds = std::fmod(g_playback_seconds,
-                                      g_video_info.duration_seconds);
+    screen.playback_seconds =
+        screen.frame.pts >= 0 ? static_cast<double>(screen.frame.pts) / 1000000.0
+                              : static_cast<double>(screen.decoded_frames) / native_fps;
+    if (screen.video_info.duration_seconds > 0.0) {
+        screen.playback_seconds =
+            std::fmod(screen.playback_seconds, screen.video_info.duration_seconds);
     }
-    if (!g_presenter.RenderFrame(g_frame, g_config.Get().scaling_mode)) {
+    if (!screen.presenter.RenderFrame(screen.frame, g_config.Get().scaling_mode)) {
         CheckDeviceLost();
         return false;
     }
-    const HRESULT present_result = g_presenter.Present(0);
+    const HRESULT present_result = screen.presenter.Present(0);
     if (present_result == DXGI_ERROR_DEVICE_REMOVED ||
         present_result == DXGI_ERROR_DEVICE_RESET) {
         g_device_lost = true;
     }
     if (FAILED(present_result)) return false;
-    if (!g_has_presented_frame) {
-        g_has_presented_frame = true;
-        if (g_window) ShowWindow(g_window, SW_SHOWNA);
+    if (!screen.has_presented_frame) {
+        screen.has_presented_frame = true;
+        ShowWindow(screen.window, SW_SHOWNA);
     }
     return true;
 }
@@ -263,94 +325,185 @@ std::wstring ChooseVideoFile() {
     return result;
 }
 
-void ResizeToDesktop() {
-    if (!g_window) return;
-    HWND parent = g_injector.GetWorkerW();
-    RECT rect = {};
-    if (!parent || !GetClientRect(parent, &rect)) {
-        rect.right = GetSystemMetrics(SM_CXVIRTUALSCREEN);
-        rect.bottom = GetSystemMetrics(SM_CYVIRTUALSCREEN);
-    }
-    const int width = (std::max)(1L, rect.right - rect.left);
-    const int height = (std::max)(1L, rect.bottom - rect.top);
-    SetWindowPos(g_window, HWND_BOTTOM, 0, 0, width, height,
-                 SWP_NOACTIVATE);
-    if (g_presenter.Resize(width, height)) {
-        g_has_presented_frame = false;
-        ShowWindow(g_window, SW_HIDE);
+// Repaint the Windows wallpaper where a screen window was removed.
+void RedrawDesktop() {
+    HWND desktop_window = g_injector.GetWorkerW();
+    if (desktop_window && IsWindow(desktop_window)) {
+        RedrawWindow(desktop_window, nullptr, nullptr,
+                     RDW_INVALIDATE | RDW_ERASE | RDW_ALLCHILDREN | RDW_UPDATENOW);
     }
 }
 
-bool RebuildGraphics(bool reopen_video) {
-    const double resume_seconds = g_playback_seconds;
-    const bool recovering_device = g_device_lost;
-    g_presenter.ReleaseFrameResources();
-    g_frame = {};
-    g_decoder.Close();
-    g_decoder_open = false;
-    g_video_info = {};
-    g_presenter.Cleanup();
-    g_has_presented_frame = false;
-
-    if (!g_window) return false;
-    ShowWindow(g_window, SW_HIDE);
-
-    RECT client = {};
-    if (!GetClientRect(g_window, &client) ||
-        !g_presenter.Init(g_window, (std::max)(1L, client.right - client.left),
-                          (std::max)(1L, client.bottom - client.top))) {
-        g_device_lost = true;
-        return false;
+void DestroyScreen(size_t index) {
+    Screen& screen = *g_screens[index];
+    g_resume.push_back({screen.monitor.id, screen.video_path, screen.playback_seconds});
+    CloseVideo(screen);
+    screen.presenter.Cleanup();
+    if (screen.window && IsWindow(screen.window)) {
+        const HWND window = screen.window;
+        DesktopInjector::Release(window);
+        DestroyWindow(window);
     }
-
-    g_device_lost = false;
-    if (reopen_video && !g_suspended &&
-        !g_config.Get().video_path.empty()) {
-        OpenConfiguredVideo(resume_seconds, !recovering_device);
-        // OpenConfiguredVideo checks GetDeviceRemovedReason on open failure.
-        // A missing or undecodable file alone does not mean the GPU was lost.
-    }
-    return !g_device_lost;
+    g_screens.erase(g_screens.begin() + static_cast<std::ptrdiff_t>(index));
 }
 
-bool CreateRenderWindow() {
-    const int virtual_x = GetSystemMetrics(SM_XVIRTUALSCREEN);
-    const int virtual_y = GetSystemMetrics(SM_YVIRTUALSCREEN);
-    const int virtual_width = (std::max)(1, GetSystemMetrics(SM_CXVIRTUALSCREEN));
-    const int virtual_height = (std::max)(1, GetSystemMetrics(SM_CYVIRTUALSCREEN));
-    g_window = CreateWindowExW(
-        WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE, kRenderClassName,
-        L"PicoWallpaper", WS_POPUP, virtual_x, virtual_y, virtual_width,
-        virtual_height, nullptr, nullptr, GetModuleHandleW(nullptr), nullptr);
-    if (!g_window) return false;
+double TakeResumePoint(const std::wstring& monitor_id, const std::string& path) {
+    for (auto it = g_resume.begin(); it != g_resume.end(); ++it) {
+        if (it->monitor_id == monitor_id && it->video_path == path) {
+            const double seconds = it->seconds;
+            g_resume.erase(it);
+            return seconds;
+        }
+    }
+    return 0.0;
+}
 
-    if (!g_injector.Attach(g_window)) {
-        DestroyWindow(g_window);
+bool CreateScreen(const MonitorInfo& monitor, const std::string& path, bool show_error) {
+    auto created = std::make_unique<Screen>();
+    created->monitor = monitor;
+    created->video_path = path;
+    created->playback_seconds = TakeResumePoint(monitor.id, path);
+    const int width = Width(monitor.rect);
+    const int height = Height(monitor.rect);
+    created->window = CreateWindowExW(
+        WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE, kRenderClassName, L"PicoWallpaper",
+        WS_POPUP, monitor.rect.left, monitor.rect.top, width, height, nullptr, nullptr,
+        GetModuleHandleW(nullptr), nullptr);
+    if (!created->window) {
+        g_resume.push_back({monitor.id, path, created->playback_seconds});
         return false;
     }
-    ResizeToDesktop();
-    ShowWindow(g_window, SW_HIDE);
+    g_screens.push_back(std::move(created));
+    Screen& screen = *g_screens.back();
+    if (!g_injector.Place(screen.window, monitor.rect) ||
+        !screen.presenter.Init(g_device, screen.window, width, height)) {
+        CheckDeviceLost();
+        DestroyScreen(g_screens.size() - 1);
+        return false;
+    }
+    // A file that cannot be opened keeps its hidden window; the wallpaper shows.
+    OpenVideo(screen, screen.playback_seconds, show_error);
     return true;
 }
 
-void OnTrayAction(TrayAction action) {
+// Match the screen windows to the connected monitors and the configured videos.
+// Called at startup, on display changes, Explorer restarts and tray changes.
+void SyncScreens(bool show_error = true) {
+    if (g_syncing) {
+        g_screens_dirty = true;
+        return;
+    }
+    g_syncing = true;
+    g_screens_dirty = false;
+    g_monitors = EnumerateMonitors();
+    const bool attached = g_injector.Refresh();
+
+    bool removed = false;
+    for (size_t i = g_screens.size(); i-- > 0;) {
+        Screen& screen = *g_screens[i];
+        const MonitorInfo* monitor = FindMonitor(screen.monitor.id);
+        if (attached && monitor && screen.window &&
+            VideoFor(monitor->id) == screen.video_path &&
+            g_injector.Place(screen.window, monitor->rect)) {
+            screen.monitor = *monitor;
+            if (screen.presenter.Resize(Width(monitor->rect), Height(monitor->rect))) {
+                screen.has_presented_frame = false;
+                ShowWindow(screen.window, SW_HIDE);
+            }
+            continue;
+        }
+        DestroyScreen(i);
+        removed = true;
+    }
+
+    if (attached && g_device.Get() && !g_device_lost) {
+        for (const MonitorInfo& monitor : g_monitors) {
+            const std::string path = VideoFor(monitor.id);
+            if (path.empty() || FindScreen(monitor.id)) continue;
+            if (!CreateScreen(monitor, path, show_error)) g_screens_dirty = true;
+        }
+    } else {
+        g_screens_dirty = true;
+    }
+    if (removed) RedrawDesktop();
+    if (!g_screens_dirty) g_resume.clear();
+    g_syncing = false;
+    UpdateTrayState();
+}
+
+// Every screen window is still a child of the current WorkerW, on its monitor.
+bool ScreensPlaced() {
+    const HWND workerw = g_injector.GetWorkerW();
+    for (const auto& screen : g_screens) {
+        RECT rect = {};
+        if (!screen->window || !IsWindow(workerw) || GetParent(screen->window) != workerw ||
+            !GetWindowRect(screen->window, &rect) || !EqualRect(&rect, &screen->monitor.rect)) {
+            return false;
+        }
+    }
+    return true;
+}
+
+void RecoverDevice() {
+    for (size_t i = g_screens.size(); i-- > 0;) DestroyScreen(i);
+    g_device.Cleanup();
+    if (!g_device.Create()) {
+        g_device_lost = true;
+        return;
+    }
+    g_device_lost = false;
+    // A missing or undecodable file alone does not mean the GPU was lost.
+    SyncScreens(false);
+}
+
+void AssignVideo(int monitor_index) {
+    if (monitor_index < 0 || static_cast<size_t>(monitor_index) >= g_monitors.size()) return;
+    const std::wstring monitor_id = g_monitors[static_cast<size_t>(monitor_index)].id;
+    const std::wstring selected = ChooseVideoFile();
+    if (selected.empty()) return;
+
+    const std::string path = WideToUtf8(selected);
+    std::erase(g_failed_videos, path);
+    g_config.Get().monitor_videos[monitor_id] = path;
+    g_config.Save();
+    g_manual_paused = false;
+    if (Screen* screen = FindScreen(monitor_id)) {
+        screen->video_path = path;
+        if (!OpenVideo(*screen, 0.0, true)) {
+            screen->has_presented_frame = false;
+            ShowWindow(screen->window, SW_HIDE);
+        }
+        UpdateTrayState();
+    } else {
+        SyncScreens();
+    }
+}
+
+void RemoveVideo(int monitor_index) {
+    if (monitor_index < 0 || static_cast<size_t>(monitor_index) >= g_monitors.size()) return;
+    g_config.Get().monitor_videos.erase(g_monitors[static_cast<size_t>(monitor_index)].id);
+    g_config.Save();
+    SyncScreens();
+}
+
+void ShowAbout() {
+    MessageBoxW(g_control,
+                L"PicoWallpaper " PICOWP_VERSION L"\n\n"
+                L"A small video wallpaper for Windows 10 and 11.\n"
+                L"GPL-3.0 fork of f4rdani/LiteWallpaper.\n\n"
+                L"https://github.com/MaxxingAll/PicoWallpaper",
+                L"About PicoWallpaper", MB_OK | MB_ICONINFORMATION);
+}
+
+void OnTrayAction(TrayAction action, int monitor) {
     AppConfig& config = g_config.Get();
     switch (action) {
-        case TrayAction::ChooseVideo: {
-            const std::wstring selected = ChooseVideoFile();
-            if (!selected.empty()) {
-                g_failed_video_path.clear();
-                g_playback_seconds = 0.0;
-                config.video_path = WideToUtf8(selected);
-                g_config.Save();
-                g_manual_paused = false;
-                if (g_window && !OpenConfiguredVideo()) {
-                    g_has_presented_frame = false;
-                    ShowWindow(g_window, SW_HIDE);
-                }
-            }
+        case TrayAction::MonitorVideo:
+            AssignVideo(monitor);
             break;
-        }
+        case TrayAction::MonitorRemove:
+            RemoveVideo(monitor);
+            break;
         case TrayAction::PauseResume:
             g_manual_paused = !g_manual_paused;
             break;
@@ -382,6 +535,9 @@ void OnTrayAction(TrayAction action) {
             ShellExecuteW(g_control, L"open", Config::GetConfigDir().c_str(),
                           nullptr, nullptr, SW_SHOWNORMAL);
             break;
+        case TrayAction::About:
+            ShowAbout();
+            break;
         case TrayAction::Exit:
             PostMessageW(g_control, WM_CLOSE, 0, 0);
             break;
@@ -392,7 +548,9 @@ void OnTrayAction(TrayAction action) {
 LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM wparam,
                             LPARAM lparam) {
     if (message == WM_DESTROY) {
-        if (window == g_window) g_window = nullptr;
+        for (auto& screen : g_screens) {
+            if (screen->window == window) screen->window = nullptr;
+        }
         return 0;
     }
     return DefWindowProcW(window, message, wparam, lparam);
@@ -405,14 +563,10 @@ LRESULT CALLBACK ControlProc(HWND window, UINT message, WPARAM wparam,
         return 0;
     }
     if (message == WM_APP_ATTACH) {
-        if (g_window && g_injector.Reattach(g_window)) {
-            ResizeToDesktop();
-            ShowWindow(g_window, g_has_presented_frame ? SW_SHOWNA : SW_HIDE);
-        }
         g_last_attach_attempt = 0;
         g_tray.Destroy();
         g_tray.Create(window, OnTrayAction);
-        UpdateTrayState();
+        SyncScreens();
         return 0;
     }
     switch (message) {
@@ -423,7 +577,7 @@ LRESULT CALLBACK ControlProc(HWND window, UINT message, WPARAM wparam,
             g_governor.HandlePowerChange(wparam);
             return TRUE;
         case WM_DISPLAYCHANGE:
-            ResizeToDesktop();
+            SyncScreens();
             return 0;
         case WM_CLOSE:
             DestroyWindow(window);
@@ -466,13 +620,13 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, LPWSTR, int) {
         g_config.Get().run_on_startup = startup_enabled;
         g_config.Save();
     }
+    std::wstring command_line_video;
     int argument_count = 0;
     LPWSTR* arguments = CommandLineToArgvW(GetCommandLineW(), &argument_count);
     if (arguments) {
         for (int i = 1; i + 1 < argument_count; ++i) {
             if (_wcsicmp(arguments[i], L"--video") == 0) {
-                g_config.Get().video_path = WideToUtf8(arguments[++i]);
-                g_config.Save();
+                command_line_video = arguments[++i];
             }
         }
         LocalFree(arguments);
@@ -510,23 +664,35 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, LPWSTR, int) {
         return 1;
     }
 
-    if (!CreateRenderWindow() || !RebuildGraphics(false)) {
+    if (!g_device.Create()) {
         MessageBoxW(nullptr, L"Direct3D 11 video presentation is unavailable.",
                     L"PicoWallpaper", MB_OK | MB_ICONERROR);
-        g_presenter.Cleanup();
-        g_injector.Detach();
-        if (IsWindow(g_window)) DestroyWindow(g_window);
         DestroyWindow(g_control);
         CloseHandle(instance_mutex);
         if (uninitialize_com) CoUninitialize();
         return 1;
     }
 
+    // Older versions had one video for the whole desktop; it moves to the main
+    // monitor. --video also sets the main monitor's video.
+    g_monitors = EnumerateMonitors();
+    const MonitorInfo* main_monitor = g_monitors.empty() ? nullptr : &g_monitors.front();
+    for (const MonitorInfo& monitor : g_monitors) {
+        if (monitor.primary) main_monitor = &monitor;
+    }
+    if (main_monitor) {
+        bool changed = AssignLegacyVideo(g_config.Get(), main_monitor->id);
+        if (!command_line_video.empty()) {
+            g_config.Get().monitor_videos[main_monitor->id] = WideToUtf8(command_line_video);
+            changed = true;
+        }
+        if (changed) g_config.Save();
+    }
+
     g_injector.RegisterExplorerRestart(g_control);
     g_governor.Init(g_control);
     g_tray.Create(g_control, OnTrayAction);
-    UpdateTrayState();
-    if (!g_config.Get().video_path.empty()) OpenConfiguredVideo();
+    SyncScreens();
 
     MSG message = {};
     while (g_running) {
@@ -536,22 +702,16 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, LPWSTR, int) {
             DispatchMessageW(&message);
         }
         if (!g_running) break;
+        ShowPendingErrors();
 
         const ULONGLONG now = GetTickCount64();
         if (now - g_last_attach_attempt >= 5000) {
             g_last_attach_attempt = now;
             CheckDeviceLost();
-            if (!g_window) {
-                RebuildGraphics(false);
-                g_injector.Detach();
-                if (CreateRenderWindow()) RebuildGraphics(true);
-            } else if (g_device_lost) {
-                RebuildGraphics(true);
-            } else if (!g_injector.IsAttachedValid() &&
-                       g_injector.Reattach(g_window)) {
-                ResizeToDesktop();
-                ShowWindow(g_window,
-                           g_has_presented_frame ? SW_SHOWNA : SW_HIDE);
+            if (g_device_lost) {
+                RecoverDevice();
+            } else if (g_screens_dirty || !ScreensPlaced()) {
+                SyncScreens();
             }
         }
 
@@ -563,41 +723,40 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, LPWSTR, int) {
                                      power == PowerState::Occluded ||
                                      power == PowerState::Sleeping;
         if (g_manual_paused || governor_paused) {
-            EnterSuspend();
+            bool suspended_now = false;
+            for (auto& screen : g_screens) suspended_now |= EnterSuspend(*screen);
+            if (suspended_now) {
+                SetProcessWorkingSetSize(GetCurrentProcess(), static_cast<SIZE_T>(-1),
+                                         static_cast<SIZE_T>(-1));
+            }
             MsgWaitForMultipleObjects(0, nullptr, FALSE, 200, QS_ALLINPUT);
             continue;
         }
-        if (g_suspended) LeaveSuspend();
 
-        if (g_window && g_decoder_open && !g_device_lost) {
-            RenderNextFrame(power);
-            DWORD wait_ms = (std::min)(16u, g_clock.GetSleepDurationMs());
-            if (wait_ms == 0) wait_ms = 1;
-            HANDLE frame_wait = g_presenter.GetWaitableObject();
-            if (frame_wait) {
-                MsgWaitForMultipleObjectsEx(1, &frame_wait, wait_ms, QS_ALLINPUT,
-                                            MWMO_INPUTAVAILABLE);
-            } else {
-                MsgWaitForMultipleObjects(0, nullptr, FALSE, wait_ms, QS_ALLINPUT);
+        HANDLE frame_waits[MAXIMUM_WAIT_OBJECTS - 1] = {};
+        DWORD wait_count = 0;
+        DWORD wait_ms = 200;
+        for (auto& screen : g_screens) {
+            LeaveSuspend(*screen);
+            if (!screen->window || !screen->decoder_open || g_device_lost) continue;
+            RenderNextFrame(*screen, power);
+            wait_ms = (std::min)(wait_ms,
+                                 static_cast<DWORD>((std::min)(16u, screen->clock.GetSleepDurationMs())));
+            HANDLE frame_wait = screen->presenter.GetWaitableObject();
+            if (frame_wait && wait_count < _countof(frame_waits)) {
+                frame_waits[wait_count++] = frame_wait;
             }
-        } else {
-            MsgWaitForMultipleObjects(0, nullptr, FALSE, 200, QS_ALLINPUT);
         }
+        if (wait_ms == 0) wait_ms = 1;
+        MsgWaitForMultipleObjectsEx(wait_count, frame_waits, wait_ms, QS_ALLINPUT,
+                                    MWMO_INPUTAVAILABLE);
     }
 
-    g_presenter.ReleaseFrameResources();
-    g_frame = {};
-    g_decoder.Close();
+    for (size_t i = g_screens.size(); i-- > 0;) DestroyScreen(i);
+    RedrawDesktop();
     g_tray.Destroy();
     g_governor.Shutdown();
-    HWND desktop_window = g_injector.GetWorkerW();
-    g_injector.Detach();
-    if (desktop_window && IsWindow(desktop_window)) {
-        RedrawWindow(desktop_window, nullptr, nullptr,
-                     RDW_INVALIDATE | RDW_ERASE | RDW_ALLCHILDREN | RDW_UPDATENOW);
-    }
-    g_presenter.Cleanup();
-    if (IsWindow(g_window)) DestroyWindow(g_window);
+    g_device.Cleanup();
     if (IsWindow(g_control)) DestroyWindow(g_control);
     ReleaseMutex(instance_mutex);
     CloseHandle(instance_mutex);

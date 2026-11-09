@@ -106,16 +106,12 @@ bool SelectSupportedVideoColorSpace(ID3D11VideoProcessorEnumerator1* enumerator,
     return false;
 }
 
-D3D11Presenter::~D3D11Presenter() {
+D3D11Device::~D3D11Device() {
     Cleanup();
 }
 
-bool D3D11Presenter::Init(HWND window, int width, int height) {
+bool D3D11Device::Create() {
     Cleanup();
-    m_window = window;
-    m_width = (std::max)(1, width);
-    m_height = (std::max)(1, height);
-
     const D3D_FEATURE_LEVEL levels[] = {
         D3D_FEATURE_LEVEL_11_1,
         D3D_FEATURE_LEVEL_11_0,
@@ -141,8 +137,36 @@ bool D3D11Presenter::Init(HWND window, int width, int height) {
     if (FAILED(m_device.As(&m_video_device)) ||
         FAILED(m_context.As(&m_video_context)) ||
         FAILED(m_video_context.As(&m_video_context1))) {
+        Cleanup();
         return false;
     }
+    return true;
+}
+
+void D3D11Device::Cleanup() {
+    if (m_context) m_context->ClearState();
+    m_video_context1.Reset();
+    m_video_context.Reset();
+    m_video_device.Reset();
+    m_context.Reset();
+    m_device.Reset();
+}
+
+D3D11Presenter::~D3D11Presenter() {
+    Cleanup();
+}
+
+bool D3D11Presenter::Init(const D3D11Device& device, HWND window, int width, int height) {
+    Cleanup();
+    if (!device.m_device || !device.m_video_context1) return false;
+    m_device = device.m_device;
+    m_context = device.m_context;
+    m_video_device = device.m_video_device;
+    m_video_context = device.m_video_context;
+    m_video_context1 = device.m_video_context1;
+    m_window = window;
+    m_width = (std::max)(1, width);
+    m_height = (std::max)(1, height);
     return CreateSwapChain();
 }
 

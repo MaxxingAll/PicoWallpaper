@@ -20,6 +20,7 @@ add_executable(PicoWallpaper WIN32
     src/decoder/mf_video_format.cpp
     src/platform/win32/desktop_injector.cpp
     src/platform/win32/d3d11_presenter.cpp
+    src/platform/win32/monitors.cpp
     src/platform/win32/power_governor.cpp
     src/platform/win32/startup.cpp
     src/platform/win32/tray_icon.cpp
@@ -34,6 +35,7 @@ target_compile_definitions(PicoWallpaper PRIVATE
     WINVER=0x0A00
     WIN32_LEAN_AND_MEAN
     NOMINMAX
+    PICOWP_VERSION="${PROJECT_VERSION}"
 )
 
 target_compile_options(PicoWallpaper PRIVATE
@@ -70,6 +72,7 @@ if(BUILD_TESTING)
         src/core/config.cpp
         src/decoder/mf_video_format.cpp
         src/platform/win32/d3d11_presenter.cpp
+        src/platform/win32/monitors.cpp
         src/platform/win32/startup.cpp
     )
     target_include_directories(PicoWallpaperTests PRIVATE ${CMAKE_SOURCE_DIR}/src)
@@ -77,6 +80,6 @@ if(BUILD_TESTING)
         UNICODE _UNICODE _WIN32_WINNT=0x0A00 WINVER=0x0A00 WIN32_LEAN_AND_MEAN NOMINMAX
     )
     target_compile_options(PicoWallpaperTests PRIVATE /W4 /EHsc /utf-8)
-    target_link_libraries(PicoWallpaperTests PRIVATE d3d11 dxgi mfplat mfuuid ole32 advapi32 shell32)
+    target_link_libraries(PicoWallpaperTests PRIVATE d3d11 dxgi mfplat mfuuid ole32 advapi32 shell32 user32)
     add_test(NAME regression COMMAND PicoWallpaperTests)
 endif()

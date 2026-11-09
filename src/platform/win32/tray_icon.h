@@ -3,12 +3,16 @@
 #include <windows.h>
 #include <shellapi.h>
 
+#include <string>
+#include <vector>
+
 #define WM_APP_TRAYICON (WM_APP + 1)
 
 namespace picowp {
 
 enum class TrayAction {
-    ChooseVideo,
+    MonitorVideo,
+    MonitorRemove,
     PauseResume,
     TogglePauseFullscreen,
     TogglePauseMaximized,
@@ -19,10 +23,18 @@ enum class TrayAction {
     FpsNative,
     ToggleStartup,
     OpenConfigFolder,
+    About,
     Exit,
 };
 
-using TrayCallback = void (*)(TrayAction action);
+// One "Monitor N" submenu; video is the file name, empty for the Windows wallpaper.
+struct TrayMonitor {
+    std::wstring label;
+    std::wstring video;
+};
+
+// monitor is the TrayMonitor index for MonitorVideo / MonitorRemove, otherwise -1.
+using TrayCallback = void (*)(TrayAction action, int monitor);
 
 class TrayIcon {
 public:
@@ -30,7 +42,8 @@ public:
 
     bool Create(HWND window, TrayCallback callback);
     void UpdateState(bool paused, bool pause_fullscreen, bool pause_maximized,
-                     bool pause_battery, int fps_cap, bool startup);
+                     bool pause_battery, int fps_cap, bool startup,
+                     std::vector<TrayMonitor> monitors);
     void SetTooltip(const wchar_t* text);
     void HandleMessage(LPARAM event);
     void Destroy();
@@ -48,6 +61,7 @@ private:
     bool m_pause_battery = false;
     int m_fps_cap = 30;
     bool m_startup = false;
+    std::vector<TrayMonitor> m_monitors;
 };
 
 } // namespace picowp
