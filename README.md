@@ -12,6 +12,7 @@ This project is a GPL-3.0 fork of `f4rdani/LiteWallpaper`.
 - Media Foundation hardware decoding into D3D11 NV12 surfaces
 - Direct3D 11 video-processor presentation without a CPU frame copy
 - WorkerW desktop integration
+- A separate video for each monitor; a monitor without one keeps the Windows wallpaper
 - Native system-tray controls; no web runtime or UI framework
 - Automatic pause for fullscreen apps, maximized apps, lock, and optionally battery
 - 15, 30, 60, or native FPS cap
@@ -21,12 +22,18 @@ This project is a GPL-3.0 fork of `f4rdani/LiteWallpaper`.
 ## Usage
 
 1. Run `PicoWallpaper.exe`.
-2. Open its tray icon and choose **Choose video...**.
+2. Open its tray icon, pick **Monitor 1** (or another monitor) and choose **Video...**.
+   **Remove** gives that monitor back to the Windows wallpaper.
 3. Use the same menu to pause, select an FPS cap, configure pause behavior, or exit.
 
-Settings are stored in `%APPDATA%\PicoWallpaper\config.ini`. On first launch,
+Monitor numbers are the Windows display numbers (Settings → System → Display → Identify).
+Pause, FPS cap and pause rules apply to all monitors.
+
+Settings are stored in `%APPDATA%\PicoWallpaper\config.ini`; each monitor's video
+is listed under `[monitors]`. On first launch,
 settings from the previous version are copied if no new configuration exists; the
 old configuration remains intact. Its autostart entry is migrated to `PicoWallpaper`.
+A video chosen in a single-video version moves to the main monitor.
 
 Supported formats are the formats installed Windows can decode. H.264 MP4 is
 built into standard Windows editions. VP9, AV1, HEVC, WebM, or MKV playback can

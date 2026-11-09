@@ -230,7 +230,13 @@ Do not change the back-buffer size. The swap chain stays at full desktop size.
   30 fps and a 60 fps run, replace the 2× estimate with the measured ratio.
 
 ## Out of scope
-Rust rewrite, per-monitor video, playlists, audio, HDR, FIXTODO 6 (tray double-click), release tagging.
+Rust rewrite, playlists, audio, HDR, FIXTODO 6 (tray double-click), release tagging.
+
+Per-monitor video was added outside this plan (owner request 2026-11-09, `feat/per-monitor-video`).
+Since then `main.cpp` keeps one `Screen` per monitor with a video (window, swap chain, decoder, clock)
+on a shared `D3D11Device`; tasks above that name `g_presenter`, `g_decoder`, `g_frame`, `ResizeToDesktop` or
+`RebuildGraphics` apply per screen (`SyncScreens`, `RecoverDevice`). For P4.1 the snapshot is per screen
+(monitor width × height × 4 bytes each), and pausing still applies to all screens together.
 
 ## Owner decisions
 

@@ -310,6 +310,5 @@ After items 1–4, on real hardware, record each result in `docs/BENCHMARK.md`:
 - **First fork tag.** Upstream's `v1.0.0`–`v2.0.0` already exist and CMake says `0.1.0`.
   Pushing any `v*` tag publishes a public release, so choose the scheme first
   (e.g. `mf-v0.1.0`, or `v3.0.0`, and change `tags: ["v*"]` in `build-and-release.yml` to match).
-- **Multi-monitor.** Right now one video is spread across the whole virtual desktop (each monitor
-  shows a slice). The original roadmap said "same video on each monitor". Keep span, or
-  move per-monitor to Phase 4?
+- ~~**Multi-monitor.**~~ Decided 2026-11-09: a separate video per monitor, chosen from
+  tray → Monitor N; unassigned monitors show the Windows wallpaper (branch `feat/per-monitor-video`).

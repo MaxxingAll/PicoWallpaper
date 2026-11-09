@@ -4,10 +4,11 @@
 
 The application is intentionally small and Windows-only:
 
-- `src/main.cpp`: message loop, tray actions, playback, suspend/resume
+- `src/main.cpp`: message loop, tray actions, per-monitor screens, playback, suspend/resume
 - `src/decoder/mf_decoder.*`: synchronous Media Foundation source reader
-- `src/platform/win32/d3d11_presenter.*`: D3D11 video-processor output
-- `src/platform/win32/desktop_injector.*`: WorkerW attachment
+- `src/platform/win32/d3d11_presenter.*`: shared D3D11 device and per-window video-processor output
+- `src/platform/win32/desktop_injector.*`: WorkerW lookup and window placement
+- `src/platform/win32/monitors.*`: connected monitors, their config keys and tray labels
 - `src/platform/win32/power_governor.*`: fullscreen/maximized/lock/battery checks
 - `src/core/config.*`: small INI configuration
 
@@ -18,6 +19,14 @@ processor; source cropping and aspect ratio use only the visible image.
 The presenter creates an `ID3D11VideoProcessorInputView` on that slice and blits
 directly to the swap-chain back buffer. No CPU pixel conversion, runtime shader
 compiler, or intermediate shader texture is used.
+
+Each monitor with a video is a "screen": its own child window of the WorkerW
+covering that monitor, its own swap chain, decoder and clock, all on one D3D11
+device. A monitor without a video has no window, so the WorkerW shows the Windows
+wallpaper there. `SyncScreens` matches the windows to the connected monitors and
+the `[monitors]` config at startup, on `WM_DISPLAYCHANGE`, after an Explorer
+restart and after tray changes. Monitors are keyed by their device interface path,
+so a choice stays with the physical monitor when display numbers change.
 
 Malformed optional aperture data falls back to the full frame. Color conversions
 are checked against the driver's video-processor enumerator, with limited-range
@@ -56,7 +65,9 @@ to a temporary test key, which is removed afterward; they never change the real
 Run entry. Checks remain active in Release builds.
 
 Config migration tests use temporary folders and verify copying without overwriting
-an existing configuration. Isolated registry tests cover migration of enabled and
+an existing configuration. Monitor tests cover display-number parsing, tray labels,
+the `[monitors]` round trip (Unicode and `=` in paths, removed entries) and moving
+the single-video setting to the main monitor. Isolated registry tests cover migration of enabled and
 disabled autostart settings, alongside the existing reconciliation checks.
 
 A COM enumerator stub also tests supported, unsupported and failed driver
@@ -74,6 +85,8 @@ Before a release:
 3. Verify GPU Video Decode activity and seamless looping.
 4. Exercise pause/resume for fullscreen, maximized, battery, lock, and sleep.
 5. Restart Explorer and change the monitor layout while playback is active.
+   With two monitors: different videos per monitor, one monitor removed (Windows
+   wallpaper returns), a monitor unplugged and plugged back in.
 6. Run the method in `docs/BENCHMARK.md` and record results.
 7. Inspect imports and confirm every imported DLL is a Windows system DLL.
 8. Verify the release checksum and provenance attestation.
