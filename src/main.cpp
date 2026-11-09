@@ -594,6 +594,16 @@ LRESULT CALLBACK ControlProc(HWND window, UINT message, WPARAM wparam,
 } // namespace
 
 int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, LPWSTR, int) {
+    // Overlay and monitoring tools (RTSS, Discord, Steam) inject DLLs into every
+    // D3D process; a wallpaper needs none of them. Load only Microsoft-signed
+    // images: Windows, WHQL GPU drivers and Store codec extensions still load.
+    // Without SEM_FAILCRITICALERRORS each blocked DLL raises a modal "Bad Image"
+    // box that stalls the thread loading it (seen with RTSSHooks64.dll).
+    SetErrorMode(SEM_FAILCRITICALERRORS);
+    PROCESS_MITIGATION_BINARY_SIGNATURE_POLICY signature_policy = {};
+    signature_policy.MicrosoftSignedOnly = 1;
+    SetProcessMitigationPolicy(ProcessSignaturePolicy, &signature_policy,
+                               sizeof(signature_policy));
     SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
     const HRESULT com_result = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
     const bool uninitialize_com = SUCCEEDED(com_result);

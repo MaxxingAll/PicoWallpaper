@@ -17,6 +17,8 @@ This project is a GPL-3.0 fork of `f4rdani/LiteWallpaper`.
 - Automatic pause for fullscreen apps, maximized apps, lock, and optionally battery
 - 15, 30, 60, or native FPS cap
 - Plain HKCU `Run` autostart entry
+- Loads only Microsoft-signed modules, so overlays and hooks (RTSS, Discord, Steam)
+  stay out of the wallpaper; Windows, WHQL GPU drivers and Store codec extensions load normally
 - No network access
 
 ## Usage
@@ -39,7 +41,8 @@ A video chosen in a single-video version moves to the main monitor.
 
 Supported formats are the formats installed Windows can decode. H.264 MP4 is
 built into standard Windows editions. VP9, AV1, HEVC, WebM, or MKV playback can
-require the matching Windows codec extension.
+require the matching Windows codec extension. Third-party (non-Microsoft-signed)
+Media Foundation codecs are not loaded.
 
 Wallpapers are muted. To create a smaller 1080p H.264 copy outside the app:
 

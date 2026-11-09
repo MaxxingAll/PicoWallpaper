@@ -28,6 +28,11 @@ the `[monitors]` config at startup, on `WM_DISPLAYCHANGE`, after an Explorer
 restart and after tray changes. Monitors are keyed by their device interface path,
 so a choice stays with the physical monitor when display numbers change.
 
+`wWinMain` first sets the `MicrosoftSignedOnly` process signature policy, so injected
+overlay DLLs (RTSS, Discord, Steam) fail to load. Measured on an RTX 5070: RTSSHooks64
+blocked; NVIDIA user-mode driver, VP9 Store extension and H.264 decoder load. Third-party
+shell extensions in the file dialog and third-party MF codecs are blocked too.
+
 Malformed optional aperture data falls back to the full frame. Color conversions
 are checked against the driver's video-processor enumerator, with limited-range
 BT.709 as the YUV fallback (full-range RGB for RGB textures). The chosen conversion
