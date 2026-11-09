@@ -12,25 +12,38 @@ This project is a GPL-3.0 fork of `f4rdani/LiteWallpaper`.
 - Media Foundation hardware decoding into D3D11 NV12 surfaces
 - Direct3D 11 video-processor presentation without a CPU frame copy
 - WorkerW desktop integration
+- A separate video for each monitor; a monitor without one keeps the Windows wallpaper
 - Native system-tray controls; no web runtime or UI framework
-- Automatic pause for fullscreen apps, maximized apps, lock, and optionally battery
+- Automatic pause for fullscreen apps, maximized apps, lock, screens turned off by the
+  display timeout, and optionally battery
 - 15, 30, 60, or native FPS cap
 - Plain HKCU `Run` autostart entry
+- Loads only Microsoft-signed modules, so overlays and hooks (RTSS, Discord, Steam)
+  stay out of the wallpaper; Windows, WHQL GPU drivers and Store codec extensions load normally
 - No network access
 
 ## Usage
 
 1. Run `PicoWallpaper.exe`.
-2. Open its tray icon and choose **Choose video...**.
-3. Use the same menu to pause, select an FPS cap, configure pause behavior, or exit.
+2. Open its tray icon, pick **Monitor 1** (or another monitor) and choose **Video...**.
+   **Remove** gives that monitor back to the Windows wallpaper.
+3. Use **Settings** in the same menu to pause, select an FPS cap, configure pause
+   behavior or autostart; **Exit** closes the app.
 
-Settings are stored in `%APPDATA%\PicoWallpaper\config.ini`. On first launch,
+Monitor numbers are the Windows display numbers (Settings → System → Display → Identify).
+A maximized window pauses only the monitor it is on. Fullscreen apps, battery,
+lock and **Settings → Pause** pause all monitors; the FPS cap applies to all.
+
+Settings are stored in `%APPDATA%\PicoWallpaper\config.ini`; each monitor's video
+is listed under `[monitors]`. On first launch,
 settings from the previous version are copied if no new configuration exists; the
 old configuration remains intact. Its autostart entry is migrated to `PicoWallpaper`.
+A video chosen in a single-video version moves to the main monitor.
 
 Supported formats are the formats installed Windows can decode. H.264 MP4 is
 built into standard Windows editions. VP9, AV1, HEVC, WebM, or MKV playback can
-require the matching Windows codec extension.
+require the matching Windows codec extension. Third-party (non-Microsoft-signed)
+Media Foundation codecs are not loaded.
 
 Wallpapers are muted. To create a smaller 1080p H.264 copy outside the app:
 

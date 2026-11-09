@@ -19,6 +19,14 @@ HRESULT ReadArea(IMFMediaType* media_type, REFGUID key, MFVideoArea& area) {
 
 } // namespace
 
+double MeasuredFrameRate(long long first_100ns, long long last_100ns, int samples) {
+    if (samples < 2 || last_100ns <= first_100ns) return 0.0;
+    const double fps = 10000000.0 * (samples - 1) / static_cast<double>(last_100ns - first_100ns);
+    if (fps < 1.0 || fps > 240.0) return 0.0;
+    const double whole = std::round(fps);
+    return std::abs(fps - whole) <= whole * 0.015 ? whole : fps;
+}
+
 HRESULT ReadMFVideoFormat(IMFMediaType* media_type, VideoFormat& format) {
     if (!media_type) return E_POINTER;
     format = {};

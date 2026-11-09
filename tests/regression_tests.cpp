@@ -2,6 +2,7 @@
 #include "core/number_format.h"
 #include "decoder/mf_video_format.h"
 #include "platform/win32/d3d11_presenter.h"
+#include "platform/win32/monitors.h"
 #include "platform/win32/startup.h"
 
 #include <mfapi.h>
@@ -374,6 +375,83 @@ void ConfigMigration() {
     RemoveDirectoryW(root.c_str());
 }
 
+void FrameRateFromTimestamps() {
+    // The WebM clip that played at half speed: ms timestamps 7, 40, 74, 107, ... 240 ms.
+    Check(MeasuredFrameRate(70000, 2400000, 8) == 30.0, "WebM millisecond timestamps give 30 fps");
+    Check(MeasuredFrameRate(0, 7 * 166833, 8) == 60.0, "60 fps snaps to whole");
+    Check(MeasuredFrameRate(0, 7 * 417083, 8) == 24.0, "23.976 fps snaps to 24");
+    Check(MeasuredFrameRate(0, 7 * 800000, 8) == 12.5, "12.5 fps is not snapped");
+    Check(MeasuredFrameRate(0, 0, 8) == 0.0 && MeasuredFrameRate(0, 333333, 1) == 0.0 &&
+          MeasuredFrameRate(500, 100, 8) == 0.0, "no usable timestamps");
+    Check(MeasuredFrameRate(0, 7 * 100, 8) == 0.0, "absurd rates rejected");
+}
+
+void MonitorNames() {
+    Check(DisplayNumber(L"\\\\.\\DISPLAY1") == 1, "read display number");
+    Check(DisplayNumber(L"\\\\.\\DISPLAY12") == 12, "read two-digit display number");
+    Check(DisplayNumber(L"\\\\.\\DISPLAY") == 0 && DisplayNumber(L"") == 0 &&
+          DisplayNumber(nullptr) == 0, "missing display number");
+    MonitorInfo monitor;
+    monitor.number = 2;
+    monitor.rect = {1903, 2160, 3823, 3240};
+    Check(MonitorLabel(monitor) == L"Monitor 2 (1920 x 1080)", "secondary monitor label");
+    monitor.number = 1;
+    monitor.rect = {-3840, 0, 0, 2160};
+    monitor.primary = true;
+    Check(MonitorLabel(monitor) == L"Monitor 1 (3840 x 2160, main)", "main monitor label");
+}
+
+void MonitorVideos() {
+    wchar_t temp[MAX_PATH] = {}, file[MAX_PATH] = {};
+    Check(GetTempPathW(MAX_PATH, temp) != 0 && GetTempFileNameW(temp, L"pwm", 0, file),
+          "create temporary config");
+    const std::wstring path = file;
+    constexpr wchar_t kMain[] = L"\\\\?\\DISPLAY#GSM5B7F#5&1a2b3c&0&UID4352#{e6f07b5f-ee97-4a90-b076-33f57bf4eaa7}";
+    constexpr wchar_t kSecond[] = L"\\\\.\\DISPLAY2";
+    const std::string legacy = "C:\\Videos\\\xE5\xA3\x81\xE7\xB4\x99.mp4";  // 壁紙.mp4
+    Check(WritePrivateProfileStringW(L"settings", L"video", L"C:\\old.mp4", path.c_str()) &&
+          WritePrivateProfileStringW(L"settings", L"fps", L"60", path.c_str()),
+          "write single-video config");
+
+    Config config;
+    Check(config.LoadFrom(path) && config.Get().legacy_video == "C:\\old.mp4" &&
+          config.Get().monitor_videos.empty() && config.Get().fps_cap == 60,
+          "read single-video config");
+    config.Get().legacy_video = legacy;
+    Check(AssignLegacyVideo(config.Get(), kMain) && config.Get().legacy_video.empty() &&
+          config.Get().monitor_videos.size() == 1 &&
+          config.Get().monitor_videos.at(kMain) == legacy, "legacy video goes to main monitor");
+    Check(!AssignLegacyVideo(config.Get(), kMain), "legacy video is assigned once");
+    config.Get().monitor_videos[kSecond] = "D:\\second=copy.mp4";
+    Check(config.SaveTo(path), "save monitor videos");
+
+    wchar_t value[64] = {};
+    GetPrivateProfileStringW(L"settings", L"video", L"none", value, 64, path.c_str());
+    Check(std::wstring(value) == L"none", "single-video key removed after migration");
+    Config reloaded;
+    Check(reloaded.LoadFrom(path) && reloaded.Get().monitor_videos.size() == 2 &&
+          reloaded.Get().monitor_videos.at(kMain) == legacy &&
+          reloaded.Get().monitor_videos.at(kSecond) == "D:\\second=copy.mp4" &&
+          reloaded.Get().legacy_video.empty() && reloaded.Get().fps_cap == 60,
+          "monitor videos round-trip with Unicode and '=' in paths");
+
+    reloaded.Get().monitor_videos.erase(kMain);
+    Check(reloaded.SaveTo(path), "save after removing a monitor video");
+    Config removed;
+    Check(removed.LoadFrom(path) && removed.Get().monitor_videos.size() == 1 &&
+          removed.Get().monitor_videos.count(kSecond) == 1, "removed monitor keeps no entry");
+
+    AppConfig assigned;
+    assigned.monitor_videos[kSecond] = "D:\\b.mp4";
+    assigned.legacy_video = "C:\\a.mp4";
+    Check(AssignLegacyVideo(assigned, kMain) && assigned.legacy_video.empty() &&
+          assigned.monitor_videos.size() == 1, "existing monitor choices win over legacy video");
+    assigned.legacy_video = "C:\\a.mp4";
+    Check(!AssignLegacyVideo(assigned, L"") && !assigned.legacy_video.empty(),
+          "no monitor keeps the legacy video");
+    DeleteFileW(path.c_str());
+}
+
 void StartupMigration() {
     IsolatedRegistry registry;
     HKEY run = nullptr;
@@ -471,6 +549,9 @@ int main() {
     run("color metadata", ColorMetadata);
     run("driver color support", DriverColorSupport);
     run("config migration", ConfigMigration);
+    run("frame rate from timestamps", FrameRateFromTimestamps);
+    run("monitor names", MonitorNames);
+    run("monitor videos", MonitorVideos);
     run("startup migration", StartupMigration);
     run("startup reconciliation", StartupReconciliation);
     MFShutdown();

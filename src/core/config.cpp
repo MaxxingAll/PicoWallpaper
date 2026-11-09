@@ -5,6 +5,7 @@
 #include <shlobj.h>
 
 #include <algorithm>
+#include <vector>
 
 namespace picowp {
 namespace {
@@ -82,9 +83,38 @@ bool EnsureUnicodeIni(const std::wstring& path) {
     return ok;
 }
 
+std::map<std::wstring, std::string> ReadMonitorVideos(const std::wstring& path) {
+    std::vector<wchar_t> buffer(32768);
+    for (;;) {
+        const DWORD size = static_cast<DWORD>(buffer.size());
+        const DWORD length = GetPrivateProfileSectionW(L"monitors", buffer.data(), size,
+                                                       path.c_str());
+        if (length < size - 2 || buffer.size() >= (1u << 22)) break;
+        buffer.assign(buffer.size() * 2, L'\0');
+    }
+    std::map<std::wstring, std::string> videos;
+    for (const wchar_t* line = buffer.data(); *line; line += wcslen(line) + 1) {
+        const std::wstring entry(line);
+        const size_t separator = entry.find(L'=');
+        if (separator == 0 || separator == std::wstring::npos ||
+            separator + 1 == entry.size()) {
+            continue;
+        }
+        videos[entry.substr(0, separator)] = WideToUtf8(entry.substr(separator + 1));
+    }
+    return videos;
+}
+
 } // namespace
 
 Config g_config;
+
+bool AssignLegacyVideo(AppConfig& config, const std::wstring& primary_id) {
+    if (config.legacy_video.empty() || primary_id.empty()) return false;
+    if (config.monitor_videos.empty()) config.monitor_videos[primary_id] = config.legacy_video;
+    config.legacy_video.clear();
+    return true;
+}
 
 bool MigrateLegacyConfig(const std::wstring& legacy_dir, const std::wstring& new_dir) {
     const std::wstring source = legacy_dir + L"\\config.ini";
@@ -121,12 +151,15 @@ bool Config::Load() {
     const bool migrated = MigrateLegacyConfig(
         std::wstring(app_data) + L"\\" + kLegacyConfigFolder, dir);
     const bool directory_ready = EnsureDirectory(dir);
+    return LoadFrom(GetConfigFilePath()) && migrated && directory_ready;
+}
 
-    const std::wstring path = GetConfigFilePath();
+bool Config::LoadFrom(const std::wstring& path) {
     wchar_t video[32768] = {};
     GetPrivateProfileStringW(L"settings", L"video", L"", video,
                              static_cast<DWORD>(_countof(video)), path.c_str());
-    m_config.video_path = WideToUtf8(video);
+    m_config.legacy_video = WideToUtf8(video);
+    m_config.monitor_videos = ReadMonitorVideos(path);
     m_config.scaling_mode = std::clamp(
         static_cast<int>(GetPrivateProfileIntW(L"settings", L"scaling", 0,
                                                path.c_str())), 0, 2);
@@ -137,18 +170,35 @@ bool Config::Load() {
     m_config.pause_on_maximized = ReadBool(L"pause_maximized", true, path);
     m_config.pause_on_battery = ReadBool(L"pause_battery", false, path);
     m_config.run_on_startup = ReadBool(L"run_on_startup", false, path);
-    return migrated && directory_ready;
+    return true;
 }
 
 bool Config::Save() const {
     const std::wstring dir = GetConfigDir();
     if (!EnsureDirectory(dir)) return false;
+    return SaveTo(GetConfigFilePath());
+}
 
-    const std::wstring path = GetConfigFilePath();
+bool Config::SaveTo(const std::wstring& path) const {
     if (!EnsureUnicodeIni(path)) return false;
-    const std::wstring video = Utf8ToWide(m_config.video_path);
-    bool ok = WritePrivateProfileStringW(L"settings", L"video", video.c_str(),
-                                         path.c_str()) != FALSE;
+    bool ok = true;
+    if (m_config.legacy_video.empty()) {
+        WritePrivateProfileStringW(L"settings", L"video", nullptr, path.c_str());
+    } else {
+        const std::wstring video = Utf8ToWide(m_config.legacy_video);
+        ok = WritePrivateProfileStringW(L"settings", L"video", video.c_str(),
+                                        path.c_str()) != FALSE;
+    }
+    // Rewrite the section so removed monitors lose their entry.
+    WritePrivateProfileStringW(L"monitors", nullptr, nullptr, path.c_str());
+    for (const auto& [monitor, video_path] : m_config.monitor_videos) {
+        const std::wstring video = Utf8ToWide(video_path);
+        if (video.empty()) continue;
+        if (!WritePrivateProfileStringW(L"monitors", monitor.c_str(), video.c_str(),
+                                        path.c_str())) {
+            ok = false;
+        }
+    }
     if (!WriteInt(L"scaling", m_config.scaling_mode, path)) ok = false;
     if (!WriteInt(L"fps", m_config.fps_cap, path)) ok = false;
     if (!WriteBool(L"pause_fullscreen", m_config.pause_on_fullscreen, path)) {

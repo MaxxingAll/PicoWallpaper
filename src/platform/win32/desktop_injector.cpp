@@ -9,23 +9,13 @@ static UINT g_taskbar_created_msg = 0;
 DesktopInjector::DesktopInjector() = default;
 
 DesktopInjector::~DesktopInjector() {
-    Detach();
     if (m_msg_receiver) {
         DestroyWindow(m_msg_receiver);
         m_msg_receiver = nullptr;
     }
 }
 
-bool DesktopInjector::IsWorkerWClass(HWND hwnd) {
-    if (!hwnd || !IsWindow(hwnd)) return false;
-    wchar_t cls[64] = {};
-    if (GetClassNameW(hwnd, cls, 64) == 0) return false;
-    return (wcscmp(cls, L"WorkerW") == 0);
-}
-
-HWND DesktopInjector::FindDesktopWorkerW(bool* out_is_fallback) {
-    if (out_is_fallback) *out_is_fallback = false;
-
+HWND DesktopInjector::FindDesktopWorkerW() {
     // 1. Find Progman window with multi-stage lookup
     HWND progman = FindWindowW(L"Progman", L"Program Manager");
     if (!progman) {
@@ -81,89 +71,42 @@ HWND DesktopInjector::FindDesktopWorkerW(bool* out_is_fallback) {
         if (workerw) return workerw;
 
         // 5. Fallback: attach directly to Progman (desktop icons hidden case or early boot)
-        if (out_is_fallback) *out_is_fallback = true;
         return progman;
     }
 
     return nullptr;
 }
 
-bool DesktopInjector::Attach(HWND renderHwnd) {
-    if (!renderHwnd) return false;
+bool DesktopInjector::Refresh() {
+    m_workerw = FindDesktopWorkerW();
+    return m_workerw != nullptr;
+}
 
-    bool is_fallback = false;
-    m_workerw = FindDesktopWorkerW(&is_fallback);
-    if (!m_workerw) {
-        ShowWindow(renderHwnd, SW_HIDE);
-        return false;
+bool DesktopInjector::Place(HWND window, const RECT& screen_rect) {
+    if (!window || !IsWindow(window) || !IsWindow(m_workerw)) return false;
+    if (GetParent(window) != m_workerw) {
+        LONG_PTR style = GetWindowLongPtrW(window, GWL_STYLE);
+        style = (style & ~WS_POPUP) | WS_CHILD;
+        SetWindowLongPtrW(window, GWL_STYLE, style);
+        SetParent(window, m_workerw);
+        if (GetParent(window) != m_workerw) return false;
     }
-
-    m_is_fallback = is_fallback;
-    m_render_hwnd = renderHwnd;
-
-    // Remove window decorations and make it a child window
-    LONG_PTR style = GetWindowLongPtrW(renderHwnd, GWL_STYLE);
-    style &= ~(WS_CAPTION | WS_THICKFRAME | WS_MINIMIZEBOX | WS_MAXIMIZEBOX | WS_SYSMENU | WS_POPUP);
-    style |= WS_CHILD;
-    SetWindowLongPtrW(renderHwnd, GWL_STYLE, style);
-
-    // Set WorkerW as parent
-    SetParent(renderHwnd, m_workerw);
-
-    // Resize child to cover the parent WorkerW client area
-    RECT rc;
-    int w = 0, h = 0;
-    if (GetClientRect(m_workerw, &rc) && rc.right > 0 && rc.bottom > 0) {
-        w = rc.right - rc.left;
-        h = rc.bottom - rc.top;
-    } else {
-        w = GetSystemMetrics(SM_CXVIRTUALSCREEN);
-        h = GetSystemMetrics(SM_CYVIRTUALSCREEN);
-    }
-
-    SetWindowPos(
-        renderHwnd,
-        HWND_BOTTOM,
-        0, 0, w, h,
-        SWP_NOACTIVATE
-    );
-    return true;
+    // The WorkerW spans the virtual screen; its client origin need not be (0, 0)
+    // in screen coordinates, so map the monitor rectangle into it.
+    POINT origin = {screen_rect.left, screen_rect.top};
+    if (!ScreenToClient(m_workerw, &origin)) return false;
+    return SetWindowPos(window, HWND_BOTTOM, origin.x, origin.y,
+                        screen_rect.right - screen_rect.left,
+                        screen_rect.bottom - screen_rect.top, SWP_NOACTIVATE) != FALSE;
 }
 
-void DesktopInjector::Detach() {
-    if (IsWindow(m_render_hwnd)) {
-        ShowWindow(m_render_hwnd, SW_HIDE);
-        LONG_PTR style = GetWindowLongPtrW(m_render_hwnd, GWL_STYLE);
-        style &= ~WS_CHILD;
-        style |= WS_POPUP;
-        SetWindowLongPtrW(m_render_hwnd, GWL_STYLE, style);
-        SetParent(m_render_hwnd, nullptr);
-    }
-    m_render_hwnd = nullptr;
-    m_workerw = nullptr;
-    m_is_fallback = false;
-}
-
-bool DesktopInjector::Reattach(HWND renderHwnd) {
-    Detach();
-    return Attach(renderHwnd);
-}
-
-bool DesktopInjector::IsAttached() const {
-    return m_workerw != nullptr && m_render_hwnd != nullptr;
-}
-
-bool DesktopInjector::IsAttachedValid() const {
-    if (!IsAttached()) return false;
-    if (!IsWindow(m_workerw)) return false;
-    if (!IsWindow(m_render_hwnd)) return false;
-    HWND parent = GetParent(m_render_hwnd);
-    if (parent != m_workerw) return false;
-    return true;
-}
-
-bool DesktopInjector::IsTrueWorkerW() const {
-    return IsAttached() && !m_is_fallback && IsWorkerWClass(m_workerw);
+void DesktopInjector::Release(HWND window) {
+    if (!IsWindow(window)) return;
+    ShowWindow(window, SW_HIDE);
+    LONG_PTR style = GetWindowLongPtrW(window, GWL_STYLE);
+    style = (style & ~WS_CHILD) | WS_POPUP;
+    SetWindowLongPtrW(window, GWL_STYLE, style);
+    SetParent(window, nullptr);
 }
 
 HWND DesktopInjector::GetWorkerW() const {
@@ -209,10 +152,6 @@ void DesktopInjector::RegisterExplorerRestart(HWND targetHwnd) {
             SetWindowLongPtrW(m_msg_receiver, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(targetHwnd));
         }
     }
-}
-
-UINT DesktopInjector::GetTaskbarRestartMsg() const {
-    return m_taskbar_restart_msg;
 }
 
 } // namespace picowp

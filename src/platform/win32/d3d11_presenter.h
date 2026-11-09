@@ -18,19 +18,37 @@ bool SelectSupportedVideoColorSpace(ID3D11VideoProcessorEnumerator1* enumerator,
                                     DXGI_COLOR_SPACE_TYPE requested,
                                     DXGI_COLOR_SPACE_TYPE& selected);
 
+// One D3D11 device shared by every monitor's presenter and decoder.
+class D3D11Device {
+public:
+    ~D3D11Device();
+
+    bool Create();
+    void Cleanup();
+
+    ID3D11Device* Get() const { return m_device.Get(); }
+
+private:
+    friend class D3D11Presenter;
+
+    Microsoft::WRL::ComPtr<ID3D11Device> m_device;
+    Microsoft::WRL::ComPtr<ID3D11DeviceContext> m_context;
+    Microsoft::WRL::ComPtr<ID3D11VideoDevice> m_video_device;
+    Microsoft::WRL::ComPtr<ID3D11VideoContext> m_video_context;
+    Microsoft::WRL::ComPtr<ID3D11VideoContext1> m_video_context1;
+};
+
 class D3D11Presenter {
 public:
     ~D3D11Presenter();
 
-    bool Init(HWND window, int width, int height);
+    bool Init(const D3D11Device& device, HWND window, int width, int height);
     bool RenderFrame(const VideoFrame& frame, int scaling_mode = 0);
     HRESULT Present(UINT sync_interval = 0);
     bool Resize(int width, int height);
     void ReleaseFrameResources();
     void Cleanup();
 
-    ID3D11Device* GetDevice() const { return m_device.Get(); }
-    ID3D11DeviceContext* GetContext() const { return m_context.Get(); }
     HANDLE GetWaitableObject() const { return m_frame_waitable; }
 
 private:

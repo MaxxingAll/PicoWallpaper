@@ -28,6 +28,7 @@ public:
 private:
     bool ConfigureVideoType();
     bool ReadVideoInfo();
+    void MeasureFrameRate();
     void SetError(HRESULT hr, const char* operation);
 
     Microsoft::WRL::ComPtr<IMFSourceReader> m_reader;
@@ -38,6 +39,7 @@ private:
     VideoInfo m_info;
     std::string m_last_error;
     std::wstring m_path;
+    double m_measured_fps = 0.0;  // from sample timestamps; replaces a wrong media-type rate
     UINT m_device_reset_token = 0;
     bool m_com_initialized = false;
     bool m_mf_started = false;

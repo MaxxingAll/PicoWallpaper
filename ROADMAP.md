@@ -116,6 +116,8 @@ config plus an optional `Run` key.
 - [x] Settings live in `%APPDATA%\PicoWallpaper\config.ini`.
       Consider replacing nlohmann/json with a tiny INI so the build has no vcpkg dependencies.
 - [x] Multi-monitor: span the same video across the WorkerW desktop first.
+- [x] Per-monitor videos (owner, 2026-11-09): tray → Monitor N → Video... / Remove;
+      a monitor without a video shows the Windows wallpaper.
 
 **Done when** vcpkg is no longer needed and the exe is ≤ 1.5 MB.
 
@@ -134,7 +136,7 @@ config plus an optional `Run` key.
 
 ## Later / nice to have
 
-- Per-monitor videos, playlist / shuffle on a timer
+- Playlist / shuffle on a timer
 - Optional audio through WASAPI (Phase 2 note)
 - HDR passthrough (scRGB swap chain) for HDR clips
 
