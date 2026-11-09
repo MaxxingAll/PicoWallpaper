@@ -172,6 +172,7 @@ bool MFDecoder::ReadVideoInfo() {
         fps_denominator != 0) {
         m_info.fps = static_cast<double>(fps_numerator) / fps_denominator;
     }
+    if (m_measured_fps > 0.0) m_info.fps = m_measured_fps;
 
     PROPVARIANT duration;
     PropVariantInit(&duration);
@@ -281,6 +282,11 @@ bool MFDecoder::Open(const char* path, ID3D11Device* d3d_device) {
         Close();
         return false;
     }
+    MeasureFrameRate();
+    if (!m_last_error.empty()) {
+        Close();
+        return false;
+    }
 
     // With a D3D manager configured, decoded samples are expected as DXGI
     // surfaces. DecodeNextFrame verifies this before reporting a frame.
@@ -366,6 +372,36 @@ bool MFDecoder::DecodeNextFrame(VideoFrame& frame) {
     }
 }
 
+// WebM stores no frame rate; Media Foundation then reports a guess (15 fps for a
+// 30 fps clip), which halves playback speed. Trust the first sample timestamps
+// when they disagree with the media type by more than 2 %.
+void MFDecoder::MeasureFrameRate() {
+    constexpr int kSamples = 8;
+    LONGLONG first = -1, last = -1;
+    int count = 0;
+    while (count < kSamples) {
+        DWORD stream = 0, flags = 0;
+        LONGLONG timestamp = 0;
+        Microsoft::WRL::ComPtr<IMFSample> sample;
+        if (FAILED(m_reader->ReadSample(MF_SOURCE_READER_FIRST_VIDEO_STREAM, 0, &stream,
+                                        &flags, &timestamp, &sample)) ||
+            (flags & MF_SOURCE_READERF_ENDOFSTREAM) != 0) {
+            break;
+        }
+        if (!sample) continue;
+        if (first < 0) first = timestamp;
+        last = timestamp;
+        ++count;
+    }
+    SeekToStart();
+    const double measured = MeasuredFrameRate(first, last, count);
+    if (measured > 0.0 && std::abs(measured - m_info.fps) > m_info.fps * 0.02) {
+        DebugLog("media-type frame rate replaced by the sample timestamp rate");
+        m_measured_fps = measured;
+        m_info.fps = measured;
+    }
+}
+
 void MFDecoder::SeekToStart() {
     SeekTo(0.0);
 }
@@ -407,6 +443,7 @@ void MFDecoder::Close() {
     }
 
     m_device_reset_token = 0;
+    m_measured_fps = 0.0;
     m_info = {};
     m_path.clear();
 }

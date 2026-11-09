@@ -375,6 +375,17 @@ void ConfigMigration() {
     RemoveDirectoryW(root.c_str());
 }
 
+void FrameRateFromTimestamps() {
+    // The WebM clip that played at half speed: ms timestamps 7, 40, 74, 107, ... 240 ms.
+    Check(MeasuredFrameRate(70000, 2400000, 8) == 30.0, "WebM millisecond timestamps give 30 fps");
+    Check(MeasuredFrameRate(0, 7 * 166833, 8) == 60.0, "60 fps snaps to whole");
+    Check(MeasuredFrameRate(0, 7 * 417083, 8) == 24.0, "23.976 fps snaps to 24");
+    Check(MeasuredFrameRate(0, 7 * 800000, 8) == 12.5, "12.5 fps is not snapped");
+    Check(MeasuredFrameRate(0, 0, 8) == 0.0 && MeasuredFrameRate(0, 333333, 1) == 0.0 &&
+          MeasuredFrameRate(500, 100, 8) == 0.0, "no usable timestamps");
+    Check(MeasuredFrameRate(0, 7 * 100, 8) == 0.0, "absurd rates rejected");
+}
+
 void MonitorNames() {
     Check(DisplayNumber(L"\\\\.\\DISPLAY1") == 1, "read display number");
     Check(DisplayNumber(L"\\\\.\\DISPLAY12") == 12, "read two-digit display number");
@@ -538,6 +549,7 @@ int main() {
     run("color metadata", ColorMetadata);
     run("driver color support", DriverColorSupport);
     run("config migration", ConfigMigration);
+    run("frame rate from timestamps", FrameRateFromTimestamps);
     run("monitor names", MonitorNames);
     run("monitor videos", MonitorVideos);
     run("startup migration", StartupMigration);

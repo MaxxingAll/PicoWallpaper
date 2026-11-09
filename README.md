@@ -24,7 +24,8 @@ This project is a GPL-3.0 fork of `f4rdani/LiteWallpaper`.
 1. Run `PicoWallpaper.exe`.
 2. Open its tray icon, pick **Monitor 1** (or another monitor) and choose **Video...**.
    **Remove** gives that monitor back to the Windows wallpaper.
-3. Use the same menu to pause, select an FPS cap, configure pause behavior, or exit.
+3. Use **Settings** in the same menu to pause, select an FPS cap, configure pause
+   behavior or autostart; **Exit** closes the app.
 
 Monitor numbers are the Windows display numbers (Settings → System → Display → Identify).
 Pause, FPS cap and pause rules apply to all monitors.

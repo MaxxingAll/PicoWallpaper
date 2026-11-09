@@ -106,24 +106,27 @@ void TrayIcon::RebuildMenu() {
                     MenuText(monitor.label).c_str());
     }
     AppendMenuW(m_menu, MF_SEPARATOR, 0, nullptr);
-    AppendMenuW(m_menu, MF_STRING, MenuPause, m_paused ? L"Resume" : L"Pause");
-    AppendMenuW(m_menu, MF_SEPARATOR, 0, nullptr);
+
+    HMENU settings_menu = CreatePopupMenu();
+    AppendMenuW(settings_menu, MF_STRING, MenuPause, m_paused ? L"Resume" : L"Pause");
+    AppendMenuW(settings_menu, MF_SEPARATOR, 0, nullptr);
 
     HMENU pause_menu = CreatePopupMenu();
     AppendMenuW(pause_menu, Checked(m_pause_fullscreen), MenuPauseFullscreen, L"Fullscreen apps");
     AppendMenuW(pause_menu, Checked(m_pause_maximized), MenuPauseMaximized, L"Maximized apps");
     AppendMenuW(pause_menu, Checked(m_pause_battery), MenuPauseBattery, L"On battery");
-    AppendMenuW(m_menu, MF_POPUP, reinterpret_cast<UINT_PTR>(pause_menu), L"Pause when");
+    AppendMenuW(settings_menu, MF_POPUP, reinterpret_cast<UINT_PTR>(pause_menu), L"Pause when");
 
     HMENU fps_menu = CreatePopupMenu();
     AppendMenuW(fps_menu, Checked(m_fps_cap == 15), MenuFps15, L"15 FPS");
     AppendMenuW(fps_menu, Checked(m_fps_cap == 30), MenuFps30, L"30 FPS");
     AppendMenuW(fps_menu, Checked(m_fps_cap == 60), MenuFps60, L"60 FPS");
     AppendMenuW(fps_menu, Checked(m_fps_cap == 0), MenuFpsNative, L"Native");
-    AppendMenuW(m_menu, MF_POPUP, reinterpret_cast<UINT_PTR>(fps_menu), L"FPS cap");
+    AppendMenuW(settings_menu, MF_POPUP, reinterpret_cast<UINT_PTR>(fps_menu), L"FPS cap");
 
-    AppendMenuW(m_menu, Checked(m_startup), MenuStartup, L"Run at startup");
-    AppendMenuW(m_menu, MF_STRING, MenuConfigFolder, L"Open config folder");
+    AppendMenuW(settings_menu, Checked(m_startup), MenuStartup, L"Run at startup");
+    AppendMenuW(settings_menu, MF_STRING, MenuConfigFolder, L"Open config folder");
+    AppendMenuW(m_menu, MF_POPUP, reinterpret_cast<UINT_PTR>(settings_menu), L"Settings");
     AppendMenuW(m_menu, MF_SEPARATOR, 0, nullptr);
     AppendMenuW(m_menu, MF_STRING, MenuAbout, L"About PicoWallpaper");
     AppendMenuW(m_menu, MF_STRING, MenuExit, L"Exit");
