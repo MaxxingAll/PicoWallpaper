@@ -19,9 +19,15 @@ bool IsAppWindow(HWND window) {
 
     wchar_t class_name[64] = {};
     GetClassNameW(window, class_name, static_cast<int>(_countof(class_name)));
+    // Shell surfaces are not apps. The taskbar flyouts (XamlExplorerHostIslandWindow)
+    // and Start/Search/notification hosts (Windows.UI.Core.CoreWindow) can be sized to
+    // the whole monitor and looked fullscreen (traced on a 4K monitor, 2026-11-09).
     return wcscmp(class_name, L"Progman") != 0 &&
            wcscmp(class_name, L"WorkerW") != 0 &&
            wcscmp(class_name, L"Shell_TrayWnd") != 0 &&
+           wcscmp(class_name, L"Shell_SecondaryTrayWnd") != 0 &&
+           wcscmp(class_name, L"XamlExplorerHostIslandWindow") != 0 &&
+           wcscmp(class_name, L"Windows.UI.Core.CoreWindow") != 0 &&
            wcscmp(class_name, kRenderClassName) != 0;
 }
 
