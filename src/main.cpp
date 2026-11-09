@@ -20,10 +20,11 @@
 #include "platform/win32/power_governor.h"
 #include "platform/win32/startup.h"
 #include "platform/win32/tray_icon.h"
+#include "platform/win32/window_classes.h"
 
 #define WM_APP_ATTACH (WM_APP + 11)
 
-using namespace miniwp;
+using namespace picowp;
 
 namespace {
 
@@ -50,8 +51,7 @@ uint64_t g_decoded_frames = 0;
 double g_decode_accumulator = 0.0;
 ULONGLONG g_last_attach_attempt = 0;
 
-constexpr wchar_t kRenderClassName[] = L"LiteWallpaperMFWindow";
-constexpr wchar_t kControlClassName[] = L"LiteWallpaperMFControl";
+constexpr wchar_t kControlClassName[] = L"PicoWallpaperControl";
 
 LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM wparam,
                             LPARAM lparam);
@@ -91,7 +91,7 @@ void ShowDecoderError(const std::string& fallback) {
     std::string message = g_decoder.GetLastError();
     if (message.empty()) message = fallback;
     const std::wstring wide = Utf8ToWide(message);
-    MessageBoxW(nullptr, wide.c_str(), L"LiteWallpaper-MF",
+    MessageBoxW(nullptr, wide.c_str(), L"PicoWallpaper",
                 MB_OK | MB_ICONERROR);
 }
 
@@ -160,7 +160,7 @@ bool OpenConfiguredVideo(double seek_seconds = 0.0, bool show_error = true) {
     g_suspended = false;
     g_failed_video_path.clear();
 
-    std::wstring tooltip = L"LiteWallpaper-MF - ";
+    std::wstring tooltip = L"PicoWallpaper - ";
     const size_t separator = wide_path.find_last_of(L"\\/");
     tooltip += separator == std::wstring::npos
                    ? wide_path
@@ -320,7 +320,7 @@ bool CreateRenderWindow() {
     const int virtual_height = (std::max)(1, GetSystemMetrics(SM_CYVIRTUALSCREEN));
     g_window = CreateWindowExW(
         WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE, kRenderClassName,
-        L"LiteWallpaper-MF", WS_POPUP, virtual_x, virtual_y, virtual_width,
+        L"PicoWallpaper", WS_POPUP, virtual_x, virtual_y, virtual_width,
         virtual_height, nullptr, nullptr, GetModuleHandleW(nullptr), nullptr);
     if (!g_window) return false;
 
@@ -445,16 +445,23 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, LPWSTR, int) {
     const bool uninitialize_com = SUCCEEDED(com_result);
 
     HANDLE instance_mutex = CreateMutexW(nullptr, TRUE,
-                                         L"Local\\LiteWallpaper-MF.Instance");
+                                         L"Local\\PicoWallpaper.Instance");
     if (!instance_mutex || GetLastError() == ERROR_ALREADY_EXISTS) {
         if (instance_mutex) CloseHandle(instance_mutex);
         if (uninitialize_com) CoUninitialize();
         return 0;
     }
 
-    g_config.Load();
+    if (!g_config.Load()) {
+        MessageBoxW(nullptr, L"Could not load or migrate the configuration. Check access to the configuration folder and try again.",
+                    L"PicoWallpaper", MB_OK | MB_ICONERROR);
+        CloseHandle(instance_mutex);
+        if (uninitialize_com) CoUninitialize();
+        return 1;
+    }
     bool startup_enabled = g_config.Get().run_on_startup;
-    if (ReconcileRunAtStartup(startup_enabled) &&
+    if (MigrateLegacyRunAtStartup(startup_enabled) &&
+        ReconcileRunAtStartup(startup_enabled) &&
         startup_enabled != g_config.Get().run_on_startup) {
         g_config.Get().run_on_startup = startup_enabled;
         g_config.Save();
@@ -495,7 +502,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, LPWSTR, int) {
     }
 
     g_control = CreateWindowExW(
-        WS_EX_TOOLWINDOW, kControlClassName, L"LiteWallpaper-MF Control",
+        WS_EX_TOOLWINDOW, kControlClassName, L"PicoWallpaper Control",
         WS_POPUP, 0, 0, 0, 0, nullptr, nullptr, instance, nullptr);
     if (!g_control) {
         CloseHandle(instance_mutex);
@@ -505,7 +512,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, LPWSTR, int) {
 
     if (!CreateRenderWindow() || !RebuildGraphics(false)) {
         MessageBoxW(nullptr, L"Direct3D 11 video presentation is unavailable.",
-                    L"LiteWallpaper-MF", MB_OK | MB_ICONERROR);
+                    L"PicoWallpaper", MB_OK | MB_ICONERROR);
         g_presenter.Cleanup();
         g_injector.Detach();
         if (IsWindow(g_window)) DestroyWindow(g_window);

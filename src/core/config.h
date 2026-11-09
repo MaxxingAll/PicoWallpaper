@@ -2,7 +2,10 @@
 
 #include <string>
 
-namespace miniwp {
+namespace picowp {
+
+// Copy the legacy config only when the destination is absent.
+bool MigrateLegacyConfig(const std::wstring& legacy_dir, const std::wstring& new_dir);
 
 struct AppConfig {
     std::string video_path;
@@ -31,4 +34,4 @@ private:
 
 extern Config g_config;
 
-} // namespace miniwp
+} // namespace picowp

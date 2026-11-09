@@ -6,7 +6,7 @@
 #include <cmath>
 #include <climits>
 
-namespace miniwp {
+namespace picowp {
 namespace {
 
 HRESULT ReadArea(IMFMediaType* media_type, REFGUID key, MFVideoArea& area) {
@@ -89,4 +89,4 @@ HRESULT ReadMFVideoFormat(IMFMediaType* media_type, VideoFormat& format) {
     return S_OK;
 }
 
-} // namespace miniwp
+} // namespace picowp

@@ -2,7 +2,7 @@
 
 #include <shellapi.h>
 
-namespace miniwp {
+namespace picowp {
 namespace {
 
 enum MenuId : UINT {
@@ -42,7 +42,7 @@ bool TrayIcon::Create(HWND window, TrayCallback callback) {
         GetSystemMetrics(SM_CXSMICON), GetSystemMetrics(SM_CYSMICON),
         LR_DEFAULTCOLOR | LR_SHARED));
     if (!m_icon.hIcon) m_icon.hIcon = LoadIconW(nullptr, IDI_APPLICATION);
-    wcscpy_s(m_icon.szTip, L"LiteWallpaper-MF");
+    wcscpy_s(m_icon.szTip, L"PicoWallpaper");
     RebuildMenu();
     return Shell_NotifyIconW(NIM_ADD, &m_icon) != FALSE;
 }
@@ -133,4 +133,4 @@ void TrayIcon::Destroy() {
     m_menu = nullptr;
 }
 
-} // namespace miniwp
+} // namespace picowp

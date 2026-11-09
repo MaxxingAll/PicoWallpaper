@@ -5,7 +5,7 @@
 struct ID3D11Texture2D;
 struct ID3D11Device;
 
-namespace miniwp {
+namespace picowp {
 
 enum class VideoRange { Unknown, Limited, Full };
 enum class VideoMatrix { Unknown, BT601, BT709, BT2020 };
@@ -63,4 +63,4 @@ public:
     virtual void Close() = 0;
 };
 
-} // namespace miniwp
+} // namespace picowp

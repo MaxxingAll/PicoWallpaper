@@ -1,6 +1,6 @@
 # EFFICIENCY-PLAN
 
-Goal: rename the app to PicoWallpaper (Phase R), then a smaller executable and lower CPU, wake-up and GPU-memory
+Goal: complete the PicoWallpaper identity migration (Phase R), then a smaller executable and lower CPU, wake-up and GPU-memory
 use, with no feature change.
 Base: `main` @ `0511172` (2026-11-02). Line numbers below refer to that commit; after Phase R, locate code by the
 function names given (the rename shifts a few lines).
@@ -28,42 +28,41 @@ Owner priority: tiny footprint and efficiency. A Rust rewrite was assessed and r
 
 ## Phase R — Rename to PicoWallpaper (branch `chore/rename-picowallpaper`)
 
-The GitHub repository is already `MaxxingAll/PicoWallpaper`; the code still uses `LiteWallpaper-MF`,
-`LiteWallpaperMF`, `MiniWallpaper` and the namespace `miniwp`. Inventory: `git grep -n -i -E
-"litewallpaper|miniwallpaper|miniwp"` (about 60 hits plus 41 `miniwp` lines on `0511172`).
+The repository and application use PicoWallpaper. R1 updates the build, runtime identity,
+configuration, autostart and public documentation together; CI and owner acceptance are tracked below.
 
 ### R1 Rename everything
-- **Where and change:**
+- **Current names and scope:**
 
-  | Old | New | Where |
+  | Identity | Current name | Where |
   |---|---|---|
-  | exe `LiteWallpaper-MF.exe` | `PicoWallpaper.exe` | `CMakeLists.txt` `OUTPUT_NAME`; both workflows (size check, staging, checksum, attestation, release assets) |
-  | CMake `project(LiteWallpaperMF …)`, targets `LiteWallpaperMF` / `LiteWallpaperTests`, `FATAL_ERROR` texts | `PicoWallpaper`, `PicoWallpaper` / `PicoWallpaperTests` | `CMakeLists.txt` |
-  | namespace `miniwp` | `picowp` | every file under `src/` and `tests/` |
-  | window classes `LiteWallpaperMFWindow`, `LiteWallpaperMFControl`, `MiniWallpaper_MsgReceiver` | `PicoWallpaperWindow`, `PicoWallpaperControl`, `PicoWallpaper_MsgReceiver` | `main.cpp:53-54`, `desktop_injector.cpp:193,199`; the class-name check in `power_governor.cpp:24` must use the same constant as `main.cpp` (share one constant so they cannot drift) |
-  | window titles, message-box titles, tray tooltip, debug-log prefix `LiteWallpaper-MF` | `PicoWallpaper` | `main.cpp:94,163,323,498,508`, `tray_icon.cpp:45`, `mf_decoder.cpp:87` |
-  | instance mutex `Local\LiteWallpaper-MF.Instance` | `Local\PicoWallpaper.Instance` | `main.cpp:448` |
-  | config folder `%APPDATA%\LiteWallpaper-MF` | `%APPDATA%\PicoWallpaper` | `config.cpp:96` |
-  | Run value `LiteWallpaper-MF` | `PicoWallpaper` | `startup.cpp:11`, tests |
-  | docs | PicoWallpaper | `README.md`, `ROADMAP.md` (title, config path), `DEVELOPMENT.md`, `docs/BENCHMARK.md`, this plan; `FIXTODO.md:300-301` (exe name) |
+  | Executable and linker map | `PicoWallpaper.exe`, `PicoWallpaper.map` | CMake output and /MAP; both workflows, size checks, checksum, attestation, release assets and downloadable CI artifacts |
+  | CMake project and targets | `PicoWallpaper`, `PicoWallpaperTests` | `CMakeLists.txt` |
+  | Namespace | `picowp` | `src/` and `tests/` |
+  | Window classes | `PicoWallpaperWindow`, `PicoWallpaperControl`, `PicoWallpaper_MsgReceiver` | Main window and governor share the render-class constant |
+  | Titles, tray tooltip and debug-log prefix | `PicoWallpaper` | Main, tray and decoder |
+  | Instance mutex | `Local\PicoWallpaper.Instance` | Main |
+  | Configuration | `%APPDATA%\PicoWallpaper\config.ini` | Config and tests |
+  | Run value | `PicoWallpaper` | Startup and tests |
+  | Public docs | PicoWallpaper | README, ROADMAP, DEVELOPMENT, BENCHMARK, this plan and the two current executable checks in FIXTODO |
 
 - **Migration for existing users (required):**
-  1. *Config:* on load, if `%APPDATA%\PicoWallpaper\config.ini` does not exist and
-     `%APPDATA%\LiteWallpaper-MF\config.ini` does, copy it (`CopyFileW`, fail if exists). Never delete or change the
-     old folder. Put the copy in a small function that takes both folder paths, so a test can run it on a temp folder.
-  2. *Autostart:* at startup, before `ReconcileRunAtStartup`: if the legacy Run value `LiteWallpaper-MF` exists,
-     delete it; if the (migrated) setting `run_on_startup` is on, write the new `PicoWallpaper` value. Then reconcile
-     as today. Add isolated-registry tests (existing `IsolatedRegistry` pattern) for: legacy present + enabled →
-     only the new value remains; legacy present + disabled → no value remains; no legacy → behaviour unchanged.
-  3. Keep the legacy names only as clearly named constants used by the migration code.
-- **Keep unchanged:** upstream attribution and links (`f4rdani/LiteWallpaper` in `README.md:8`, `ROADMAP.md:3`),
-  `LICENSE`, and historical review text in `FIXTODO.md` (except lines 300-301) and `docs/P2-VALIDATION.md`.
+  1. *Config:* on load, if the new configuration does not exist and the legacy configuration does,
+     copy it (`CopyFileW`, fail if exists). Never delete or change the old folder. Keep the copy in a small
+     function taking both folder paths, tested with temporary folders.
+  2. *Autostart:* before `ReconcileRunAtStartup`, remove any legacy Run value; if the migrated setting
+     `run_on_startup` is on, write the new `PicoWallpaper` value. Then reconcile as before. Isolated-registry
+     tests cover legacy present + enabled → only new value; legacy present + disabled → no value; and
+     no legacy → unchanged behavior.
+  3. Legacy identity literals remain only as clearly named migration constants and their tests.
+- **Keep unchanged:** upstream attribution and links in README and ROADMAP, `LICENSE`, historical review
+  text in `FIXTODO.md` (except its two current executable checks) and `docs/P2-VALIDATION.md`.
   Do not rename the GitHub repository or the owner's local folders.
-- **Done when:** CI is green in Debug and Release and the artifact is `build/Release/PicoWallpaper.exe`;
-  `git grep -n -i -E "litewallpaper|miniwallpaper|miniwp"` returns only the upstream attribution, the legacy
-  migration constants and their tests, and the historical files listed above (list the remaining hits in the PR);
-  migration tests pass; the owner confirms on their PC: settings and autostart carry over from the old version, the
-  tray shows "PicoWallpaper", and only one Run value exists.
+- **Done when:** Debug and Release CI pass, migration tests pass and the downloadable CI executable is
+  `build/Release/PicoWallpaper.exe`. The obsolete-identity inventory must contain only upstream attribution,
+  legacy migration constants and their tests, and the historical files above (list remaining hits in the PR).
+  Owner acceptance remains pending: settings and autostart carry over, the tray shows PicoWallpaper,
+  and only one Run value exists.
 
 ## Phase 0 — Measurement (branch `perf/p0-measure`)
 
@@ -71,7 +70,7 @@ The GitHub repository is already `MaxxingAll/PicoWallpaper`; the code still uses
 - **Where:** `CMakeLists.txt` link options (Release), `.github/workflows/build.yml` (Release job).
 - **Change:** add `/MAP` to the Release link options. Add a CI step (Release only) that finds `dumpbin.exe` via
   `vswhere` (no new third-party action) and prints `dumpbin /headers` section sizes and `dumpbin /imports` DLL names
-  for `build/Release/PicoWallpaper.exe` (the name after R1). Upload the `.map` file with `actions/upload-artifact@v4`, retention 7 days.
+  for `build/Release/PicoWallpaper.exe` (the current name). Upload the `.map` file with `actions/upload-artifact@v4`, retention 7 days.
 - **Done when:** the CI log shows section sizes and the imported DLL list; the map artifact downloads.
 
 ### P0.2 Fix the benchmark method
@@ -245,12 +244,12 @@ Rust rewrite, per-monitor video, playlists, audio, HDR, FIXTODO 6 (tray double-c
 
 | Task | Branch / PR | CI run | Result (bytes, tests) | Owner measurement |
 |---|---|---|---|---|
-| R1 | | | | Pending (owner) |
+| R1 | `chore/rename-picowallpaper` / #4 | [41603489179](https://github.com/MaxxingAll/PicoWallpaper/actions/runs/41603489179) | 218,624 → 219,648 bytes. Debug/Release CTest passed, including config migration, failure/retry and enabled/disabled autostart migration. Renamed exe and map artifacts uploaded. | Pending (owner) |
 | P0.1 | `perf/p0-measure` / #1 | [41426394525](https://github.com/MaxxingAll/PicoWallpaper/actions/runs/41426394525) | 583,168 → 583,168 bytes. Debug/Release CTest passed. Section sizes and imports logged; map downloaded (374,136 bytes). | — |
 | P0.2 | `perf/p0-measure` / #1 | [41426508723](https://github.com/MaxxingAll/PicoWallpaper/actions/runs/41426508723) | 583,168 → 583,168 bytes. Debug/Release CTest passed. | — |
 | P0.3 | — | — | — | Pending (owner) |
 | P1.1 | `perf/p1-size` / #2 | [41426763606](https://github.com/MaxxingAll/PicoWallpaper/actions/runs/41426763606) | 583,168 → 403,456 bytes. Debug/Release CTest passed. Icon ID 1 retained. | Pending (owner) |
-| P1.2 | `perf/p1-size` / #2 | [41426805260](https://github.com/MaxxingAll/PicoWallpaper/actions/runs/41426805260) | 403,456 → 333,312 bytes. Debug/Release CTest passed. ICO: 179,520 → 109,649 bytes; all seven decoded images match. Missed 60 KB target; owner accepted the verified lossless version. | Pending (owner) |
+| P1.2 | `chore/pw-icon` / #3 | [41427942431](https://github.com/MaxxingAll/PicoWallpaper/actions/runs/41427942431) | Owner-supplied PW icon supersedes the recompressed icon from #2. Executable: 295,424 → 218,624 bytes; ICO: 109,649 → 32,453 bytes. Debug/Release CTest passed. | Scaling check pending (owner) |
 | P1.3 | `perf/p1-size` / #2 | [41426834216](https://github.com/MaxxingAll/PicoWallpaper/actions/runs/41426834216) | 333,312 → 295,424 bytes. Debug/Release CTest passed, including formatter boundaries. Formatting routines removed; literal object-name check unmet (see below). | — |
 | P1.4 | — | — | Dropped (D1: No) | — |
 | P3.1 | | | | Pending (owner) |

@@ -26,21 +26,21 @@ jobs:
       - name: Stage executable and checksum
         shell: pwsh
         run: |
-          Copy-Item "build/Release/LiteWallpaper-MF.exe" "LiteWallpaper-MF.exe"
-          $size = (Get-Item "LiteWallpaper-MF.exe").Length
+          Copy-Item "build/Release/PicoWallpaper.exe" "PicoWallpaper.exe"
+          $size = (Get-Item "PicoWallpaper.exe").Length
           if ($size -gt 1572864) { throw "Release executable exceeds the 1.5 MB size budget: $size bytes" }
-          $hash = (Get-FileHash "LiteWallpaper-MF.exe" -Algorithm SHA256).Hash.ToLowerInvariant()
-          "$hash  LiteWallpaper-MF.exe" | Set-Content -Encoding ascii "LiteWallpaper-MF.exe.sha256"
+          $hash = (Get-FileHash "PicoWallpaper.exe" -Algorithm SHA256).Hash.ToLowerInvariant()
+          "$hash  PicoWallpaper.exe" | Set-Content -Encoding ascii "PicoWallpaper.exe.sha256"
       - name: Attest build provenance
         uses: actions/attest-build-provenance@v2
         with:
-          subject-path: LiteWallpaper-MF.exe
+          subject-path: PicoWallpaper.exe
       - name: Publish release
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            LiteWallpaper-MF.exe
-            LiteWallpaper-MF.exe.sha256
+            PicoWallpaper.exe
+            PicoWallpaper.exe.sha256
           generate_release_notes: true
           body: |
             Portable Windows 10/11 video wallpaper. No installer or bundled codec libraries.

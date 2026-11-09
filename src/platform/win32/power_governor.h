@@ -3,7 +3,7 @@
 #include <windows.h>
 #include <wtsapi32.h>
 
-namespace miniwp {
+namespace picowp {
 
 enum class PowerState {
     Active,
@@ -38,4 +38,4 @@ private:
     PowerState m_cached_state = PowerState::Active;
 };
 
-} // namespace miniwp
+} // namespace picowp

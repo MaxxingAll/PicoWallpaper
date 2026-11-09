@@ -1,4 +1,4 @@
-# LiteWallpaper-MF — Roadmap
+# PicoWallpaper — Roadmap
 
 Fork of [f4rdani/LiteWallpaper](https://github.com/f4rdani/LiteWallpaper) (GPL-3.0).
 
@@ -113,7 +113,7 @@ config plus an optional `Run` key.
   - Run at startup
   - Open config folder
   - Exit
-- [x] Settings live in `%APPDATA%\LiteWallpaper-MF\config.ini`.
+- [x] Settings live in `%APPDATA%\PicoWallpaper\config.ini`.
       Consider replacing nlohmann/json with a tiny INI so the build has no vcpkg dependencies.
 - [x] Multi-monitor: span the same video across the WorkerW desktop first.
 
